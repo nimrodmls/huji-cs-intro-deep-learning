@@ -18,6 +18,15 @@ AMINO_ACIDS = ['Y', 'C', 'Q', 'W', 'I', 'D', 'A', 'E', 'K', 'N', 'L', 'G', 'S',
                'H', 'M', 'V', 'T', 'R', 'P', 'F']
 AMINO_ACIDS_DICT = {acid: i for i, acid in enumerate(AMINO_ACIDS)}
 
+def one_hot_to_peptide(one_hot):
+    """
+    """
+    peptide = ""
+    for i in range(0, len(one_hot), len(AMINO_ACIDS)):
+        max_idx = np.argmax(one_hot[i : i + len(AMINO_ACIDS)])
+        peptide += AMINO_ACIDS[max_idx]
+    return peptide
+
 def preprocess_samples(data):
     """
     Coding each amino acid as a one-hot vector - per its index in the AMINO_ACIDS list
@@ -42,7 +51,9 @@ def generate_datasets(negative_samples, positive_samples):
     test_set_size = total_samples - train_set_size
 
     train_set = np.zeros(shape=(train_set_size, negative_samples.shape[1]))
+    train_labels = np.zeros(shape=(train_set_size))
     test_set = np.zeros(shape=(test_set_size, negative_samples.shape[1]))
+    test_labels = np.zeros(shape=(test_set_size))
 
     # Using those ranges to randomly select samples for the training & testing sets
     negative_samples_remainder = list(range(len(negative_samples)))
@@ -63,14 +74,18 @@ def generate_datasets(negative_samples, positive_samples):
         negative_samples_remainder, test_set_negative_samples_count, replace=False)
 
     train_set[:train_set_positive_samples_count] = positive_samples[train_positive_indices]
+    train_labels[:train_set_positive_samples_count] = 1
     train_set[train_set_positive_samples_count:] = negative_samples[train_negative_indices]
+
     test_set[:test_set_positive_samples_count] = positive_samples[test_positive_indices]
+    test_labels[:test_set_positive_samples_count] = 1
     test_set[test_set_positive_samples_count:] = negative_samples[test_negative_indices]
     
-    np.random.shuffle(train_set)
-    np.random.shuffle(test_set)
+    train_perm = np.random.permutation(len(train_set))
+    test_perm = np.random.permutation(len(test_set))
 
-    return train_set, test_set
+    return train_set[train_perm], train_labels[train_perm], \
+          test_set[test_perm], test_labels[test_perm]
 
 def create_base_nn(input_dim):
     model = nn.Sequential(
@@ -140,7 +155,7 @@ def main():
         positive_samples = preprocess_samples(pos_data)
 
     # Creating the training & testing datasets
-    train_set, test_set = generate_datasets(negative_samples, positive_samples)
+    train_set, train_labels, test_set, test_labels = generate_datasets(negative_samples, positive_samples)
     print('bp')
 
     # Creating the NN based on the dimension of the one-hot encoded samples
