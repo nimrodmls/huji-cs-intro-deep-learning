@@ -82,11 +82,14 @@ def generate_datasets(negative_samples, positive_samples, batch_size=16):
     negative_samples_remainder = list(range(len(negative_samples)))
     positive_samples_remainder = list(range(len(positive_samples)))
 
+    # Calculating the number of positive & negative samples in the training & testing sets
+    # as per the globally-defined ratios
     train_set_positive_samples_count = int(np.floor(len(positive_samples) * TRAIN_SET_RATIO))
     train_set_negative_samples_count = train_set_size - train_set_positive_samples_count
     test_set_positive_samples_count = len(positive_samples) - train_set_positive_samples_count
     test_set_negative_samples_count = len(negative_samples) - train_set_negative_samples_count
 
+    # Randomly selecting samples for the training & testing sets
     train_positive_indices = np.random.choice(
         positive_samples_remainder, train_set_positive_samples_count, replace=False)
     test_positive_indices = list(set(positive_samples_remainder) - set(train_positive_indices))
@@ -95,17 +98,23 @@ def generate_datasets(negative_samples, positive_samples, batch_size=16):
         negative_samples_remainder, train_set_negative_samples_count, replace=False)
     test_negative_indices = list(set(negative_samples_remainder) - set(train_negative_indices))
 
+    # Building the training set & its corresponding labels,
+    # we insert the positive samples first and then the negative samples
+    # the order is later ignored by random sampling
     train_set[:train_set_positive_samples_count] = positive_samples[train_positive_indices]
     train_labels[:train_set_positive_samples_count] = 1
     train_set[train_set_positive_samples_count:] = negative_samples[train_negative_indices]
+    # Weighing the samples in the training set according to the imbalance of the dataset
     train_set_weights = np.zeros(shape=(train_set_size))
     train_set_weights[:train_set_positive_samples_count] = 1. / train_set_positive_samples_count
     train_set_weights[train_set_positive_samples_count:] = 1. / train_set_negative_samples_count
     sampler = WeightedRandomSampler(train_set_weights, train_set_size, replacement=True)
 
+    # Building the testing set & its corresponding labels, in the same manner as the training set
     test_set[:test_set_positive_samples_count] = positive_samples[test_positive_indices]
     test_labels[:test_set_positive_samples_count] = 1
     test_set[test_set_positive_samples_count:] = negative_samples[test_negative_indices]
+    # Weighted sampler for the test set is not required as it's only evaluated and not trained on
     
     trainset = torch.utils.data.TensorDataset(
         torch.tensor(train_set).float(), torch.tensor(train_labels).long())
