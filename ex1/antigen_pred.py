@@ -1,8 +1,10 @@
+from tqdm import tqdm
 import torch
 import torch.nn as nn
 import numpy as np
 import matplotlib.pyplot as plt
 
+# Paths for the data files - Change according to the location of the files on your machine
 NEGATIVE_SAMPLE_PATH = "neg_A0201.txt"
 POSITIVE_SAMPLE_PATH = "pos_A0201.txt"
 # The ratio of negative samples to positive samples is 8:1,
@@ -20,6 +22,9 @@ AMINO_ACIDS_DICT = {acid: i for i, acid in enumerate(AMINO_ACIDS)}
 
 def one_hot_to_peptide(one_hot):
     """
+    Utility function for converting a one-hot vector of peptide to a string peptide sequence.
+    @param one_hot: The one-hot vector of the peptide
+    @return: The peptide sequence
     """
     peptide = ""
     for i in range(0, len(one_hot), len(AMINO_ACIDS)):
@@ -93,53 +98,87 @@ def create_base_nn(input_dim):
         # as specified in the exercise description
         nn.Linear(input_dim, input_dim), nn.ReLU(), # Hidden layer 1
         nn.Linear(input_dim, input_dim), nn.ReLU(), # Hidden layer 2
-        nn.Linear(10, 1) # Output layer
+        nn.Linear(input_dim, 1) # Output layer
     )
     return model
 
-def train_model(model, train_data, epochs=100, lr=0.01, batch_size=32):
+def train_model(model, train_data, train_labels, epochs=10, lr=0.01, batch_size=32):
     # We should consider the imbalance of the dataset when setting the weights on
     # the CrossEntropyLoss function
 
-    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # model.to(device)
-    # print('[DEBUG] Using device:', device)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model.to(device)
+    print(f'[DEBUG] Using device: {device}')
 
-    # trainset = torch.utils.data.TensorDataset(torch.tensor(train_data[['long', 'lat']].values).float(), torch.tensor(train_data['country'].values).long())
-    # valset = torch.utils.data.TensorDataset(torch.tensor(val_data[['long', 'lat']].values).float(), torch.tensor(val_data['country'].values).long())
-    # testset = torch.utils.data.TensorDataset(torch.tensor(test_data[['long', 'lat']].values).float(), torch.tensor(test_data['country'].values).long())
+    print('[TRAIN] Loading training dataset...')
+    trainset = torch.utils.data.TensorDataset(
+        torch.tensor(train_data).float(), torch.tensor(train_labels).long())
+    trainloader = torch.utils.data.DataLoader(
+        trainset, batch_size=batch_size, shuffle=True, num_workers=0)
+    print('[TRAIN] Training dataset loaded')
 
-    # trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=0)
-    # valloader = torch.utils.data.DataLoader(valset, batch_size=1024, shuffle=False, num_workers=0)
-    # testloader = torch.utils.data.DataLoader(testset, batch_size=1024, shuffle=False, num_workers=0)
+    criterion = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([NEGATIVE_SAMPLES_PER_POSITIVE])).to(device)
+    optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
-    # criterion = nn.CrossEntropyLoss().to(device)
-    # optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    for ep in range(epochs):
 
-    # for ep in range(epochs):
-    #     # TRAINING
-    #     model.train()
-    #     pred_correct = 0
-    #     ep_loss = 0.
-    #     for i, (inputs, labels) in enumerate(tqdm(trainloader)):
-    #         # perform a training iteration
-    #         inputs = inputs.to(device)
-    #         labels = labels.to(device)
+        print(f'[TRAIN] Epoch: {ep + 1}')
+        model.train()
+        pred_correct = 0
+        ep_loss = 0.
 
-    #         optimizer.zero_grad()
-    #         outputs = model(inputs)
-    #         loss = criterion(outputs, labels)
-    #         loss.backward()
-    #         if callback:
-    #             callback(model, ep)
-    #         optimizer.step()
+        for i, (inputs, labels) in enumerate(tqdm(trainloader)):
+            # perform a training iteration
+            inputs = inputs.to(device)
+            labels = labels.to(device)
 
-    #         pred_correct += (torch.argmax(outputs, dim=1) == labels).sum().item()
-    #         ep_loss += loss.item()
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs.squeeze(), labels.float())
+            loss.backward()
+            optimizer.step()
 
-    #     train_accs.append(pred_correct / len(trainset))
-    #     train_losses.append(ep_loss / len(trainloader))
-    pass
+            pred_correct += (outputs.argmax(1) == labels).sum().item()
+            a = torch.ones(len(outputs), device=device)
+            if (outputs.argmax(1) == a).sum().item() > 0:
+                print(f'[DEBUG] Correct: {pred_correct}')
+            ep_loss += loss.item()
+
+        print('[TRAIN] Loss: ', ep_loss / len(trainloader))
+        print('[TRAIN] Accuracy: ', pred_correct / len(trainset))
+
+        #train_accs.append(pred_correct / len(trainset))
+        #train_losses.append(ep_loss / len(trainloader))
+
+def test_model(model, test_data, test_labels, batch_size=32):
+    """
+    """
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model.to(device)
+    print(f'[DEBUG] Using device: {device}')
+
+    print('[TEST] Loading testing dataset...')
+    testset = torch.utils.data.TensorDataset(
+        torch.tensor(test_data).float(), torch.tensor(test_labels).long())
+    testloader = torch.utils.data.DataLoader(
+        testset, batch_size=batch_size, shuffle=True, num_workers=0)
+    print('[TEST] Testing dataset loaded')
+
+    print('[TEST] Starting evaluation...')
+    model.eval()
+    with torch.no_grad():
+        correct = 0
+        total = 0
+        for inputs, labels in testloader:
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+            outputs = model(inputs)
+
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+
+        print(f'[TEST] Accuracy: {correct / total}')
 
 def main():
     # Loading all negative & positive samples
@@ -155,30 +194,12 @@ def main():
 
     # Creating the training & testing datasets
     train_set, train_labels, test_set, test_labels = generate_datasets(negative_samples, positive_samples)
-    pos_peptides = set()
-    neg_peptides = set()
-    pos_data = set(pos_data)
-    neg_data = set(neg_data)
-    
-    for sample, label in zip(train_set, train_labels):
-        if label == 1:
-            pos_peptides.add(one_hot_to_peptide(sample) + '\n')
-        else:
-            neg_peptides.add(one_hot_to_peptide(sample) + '\n')
-
-    for sample, label in zip(test_set, test_labels):
-        if label == 1:
-            pos_peptides.add(one_hot_to_peptide(sample) + '\n')
-        else:
-            neg_peptides.add(one_hot_to_peptide(sample) + '\n')
-
-    print(pos_peptides == pos_data)
-    print(neg_peptides == neg_data)
 
     # Creating the NN based on the dimension of the one-hot encoded samples
     # (we do this on the negative samples, but in reality it's the same dimension for both)
-    #model = create_base_nn(input_dim=negative_samples.shape[1])
-    #train_model(model)
+    model = create_base_nn(input_dim=negative_samples.shape[1])
+    train_model(model, train_set, train_labels)
+    test_model(model, test_set, test_labels)
 
 if __name__ == "__main__":
     main()
