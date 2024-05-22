@@ -66,12 +66,11 @@ def generate_datasets(negative_samples, positive_samples):
 
     train_positive_indices = np.random.choice(
         positive_samples_remainder, train_set_positive_samples_count, replace=False)
-    test_positive_indices = np.random.choice(
-        positive_samples_remainder, test_set_positive_samples_count, replace=False)
+    test_positive_indices = list(set(positive_samples_remainder) - set(train_positive_indices))
+
     train_negative_indices = np.random.choice(
         negative_samples_remainder, train_set_negative_samples_count, replace=False)
-    test_negative_indices = np.random.choice(
-        negative_samples_remainder, test_set_negative_samples_count, replace=False)
+    test_negative_indices = list(set(negative_samples_remainder) - set(train_negative_indices))
 
     train_set[:train_set_positive_samples_count] = positive_samples[train_positive_indices]
     train_labels[:train_set_positive_samples_count] = 1
@@ -156,7 +155,25 @@ def main():
 
     # Creating the training & testing datasets
     train_set, train_labels, test_set, test_labels = generate_datasets(negative_samples, positive_samples)
-    print('bp')
+    pos_peptides = set()
+    neg_peptides = set()
+    pos_data = set(pos_data)
+    neg_data = set(neg_data)
+    
+    for sample, label in zip(train_set, train_labels):
+        if label == 1:
+            pos_peptides.add(one_hot_to_peptide(sample) + '\n')
+        else:
+            neg_peptides.add(one_hot_to_peptide(sample) + '\n')
+
+    for sample, label in zip(test_set, test_labels):
+        if label == 1:
+            pos_peptides.add(one_hot_to_peptide(sample) + '\n')
+        else:
+            neg_peptides.add(one_hot_to_peptide(sample) + '\n')
+
+    print(pos_peptides == pos_data)
+    print(neg_peptides == neg_data)
 
     # Creating the NN based on the dimension of the one-hot encoded samples
     # (we do this on the negative samples, but in reality it's the same dimension for both)
