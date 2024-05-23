@@ -199,13 +199,20 @@ def test_model(model, testloader):
     model.eval()
     with torch.no_grad():
         correct = 0
+        total_positive = 0
+        correct_positive_preds = 0
         for i, (inputs, labels) in enumerate(tqdm(testloader)):
             inputs = inputs.to(device)
             labels = labels.to(device)
             outputs = model(inputs)
 
-            correct += (outputs.round().squeeze() == labels).sum().item()
+            outputs = outputs.round().squeeze()
 
+            correct_positive_preds += (outputs.int() & labels.int()).sum().item()
+            total_positive += labels.sum().item()
+            correct += (outputs == labels).sum().item()
+
+        print(f'[TEST] Evaluation Recall: {correct_positive_preds / total_positive}')
         print(f'[TEST] Evaluation Accuracy: {correct / len(testloader.dataset)}')
 
 def plot_sequence(x, y, title, xlabel, ylabel):
@@ -237,13 +244,19 @@ def main():
     # Creating the NN based on the dimension of the one-hot encoded samples
     # (we do this on the negative samples, but in reality it's the same dimension for both)
     model = AntigenPredictor(input_dim=negative_samples.shape[1])
-
-    # Training
-    train_losses, train_accuracies = train_model(model, trainloader, epochs=EPOCHS, lr=LEARNING_RATE)
-    plot_sequence(
-        range(len(train_losses)), train_losses, 'Training Loss per Epoch', 'Epoch', 'Loss')
-    plot_sequence(
-        range(len(train_accuracies)), train_accuracies, 'Training Accuracy per Epoch', 'Epoch', 'Accuracy')
+    model.to(torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
+    try:
+        model.load_state_dict(torch.load('antigen_predictor.pth'))
+        print('[DEBUG] Pre-trained model loaded')
+    except FileNotFoundError:
+        print('[DEBUG] No pre-trained model found, starting training')
+        # No pre-trained model exists, so we proceed to training
+        train_losses, train_accuracies = train_model(model, trainloader, epochs=EPOCHS, lr=LEARNING_RATE)
+        plot_sequence(
+            range(len(train_losses)), train_losses, 'Training Loss per Epoch', 'Epoch', 'Loss')
+        plot_sequence(
+            range(len(train_accuracies)), train_accuracies, 'Training Accuracy per Epoch', 'Epoch', 'Accuracy')
+    torch.save(model.state_dict(), 'antigen_predictor.pth')
     
     # Testing
     test_model(model, testloader)
