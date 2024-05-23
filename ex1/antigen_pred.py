@@ -4,6 +4,12 @@ from torch.utils.data import WeightedRandomSampler
 import torch.nn as nn
 import numpy as np
 import matplotlib.pyplot as plt
+from typing import List
+
+# Hyperparameters
+EPOCHS = 10
+LEARNING_RATE = 0.01
+BATCH_SIZE = 32
 
 # Paths for the data files - Change according to the location of the files on your machine
 NEGATIVE_SAMPLE_PATH = "neg_A0201.txt"
@@ -50,10 +56,12 @@ def one_hot_to_peptide(one_hot):
         peptide += AMINO_ACIDS[max_idx]
     return peptide
 
-def preprocess_samples(data):
+def preprocess_samples(data: List[str]):
     """
     Coding each amino acid as a one-hot vector - per its index in the AMINO_ACIDS list
     and its position in the peptide sequence.
+    :param data: The samples to preprocess. Each sample is a peptide sequence.
+    :return: The one-hot encoded samples.
     """
     samples = np.zeros(shape=(len(data), len(AMINO_ACIDS) * len(data[0].strip())))
 
@@ -64,10 +72,12 @@ def preprocess_samples(data):
 
     return samples
 
-def generate_datasets(negative_samples, positive_samples, batch_size=16):
+def generate_datasets(negative_samples, positive_samples, batch_size=32):
     """
     Creating training & testing datasets from the negative & positive samples.
     """
+    print("[DEBUG] Generating datasets...")
+
     # Determining the size of the training & testing sets
     total_samples = len(negative_samples) + len(positive_samples)
     train_set_size = int(np.floor(total_samples * TRAIN_SET_RATIO))
@@ -126,11 +136,19 @@ def generate_datasets(negative_samples, positive_samples, batch_size=16):
     testloader = torch.utils.data.DataLoader(
         testset, batch_size=batch_size, shuffle=True, num_workers=0)
     
+    print("[DEBUG] Dataset generation complete")
+
     return trainloader, testloader
 
-def train_model(model, trainloader, epochs=20, lr=0.01):
-    # We should consider the imbalance of the dataset when setting the weights on
-    # the CrossEntropyLoss function
+def train_model(model, trainloader, epochs=10, lr=0.01):
+    """
+    Training the model on the training set.
+    :param model: The model to train.
+    :param trainloader: The training set.
+    :param epochs: The number of epochs to train the model.
+    :param lr: The learning rate for the optimizer.
+    :return: The losses and accuracies of the model during training, for each epoch.
+    """
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
@@ -139,6 +157,8 @@ def train_model(model, trainloader, epochs=20, lr=0.01):
     criterion = torch.nn.BCELoss().to(device)
     optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
+    losses = []
+    accuracies = []
     for ep in range(epochs):
 
         print(f'[TRAIN] Epoch: {ep + 1}')
@@ -147,7 +167,6 @@ def train_model(model, trainloader, epochs=20, lr=0.01):
         ep_loss = 0.
 
         for i, (inputs, labels) in enumerate(tqdm(trainloader)):
-            # perform a training iteration
             inputs = inputs.to(device)
             labels = labels.to(device)
 
@@ -160,13 +179,16 @@ def train_model(model, trainloader, epochs=20, lr=0.01):
             pred_correct += (outputs.round().squeeze() == labels).sum().item()
             ep_loss += loss.item()
 
-        print('[TRAIN] Loss: ', ep_loss / len(trainloader))
-        print('[TRAIN] Accuracy: ', pred_correct / len(trainloader.dataset))
+        accuracies.append(pred_correct / len(trainloader.dataset))
+        losses.append(ep_loss / len(trainloader))
 
-        #train_accs.append(pred_correct / len(trainset))
-        #train_losses.append(ep_loss / len(trainloader))
+    print('[TRAIN] Final Loss: ', losses[-1])
+    print('[TRAIN] Final Accuracy: ', accuracies[-1])
 
-def test_model(model, testloader, batch_size=32):
+    return losses, accuracies
+
+def test_model(model, testloader):
+
     """
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -177,15 +199,24 @@ def test_model(model, testloader, batch_size=32):
     model.eval()
     with torch.no_grad():
         correct = 0
-        total = 0
-        for inputs, labels in testloader:
+        for i, (inputs, labels) in enumerate(tqdm(testloader)):
             inputs = inputs.to(device)
             labels = labels.to(device)
             outputs = model(inputs)
 
             correct += (outputs.round().squeeze() == labels).sum().item()
 
-        print(f'[TEST] Accuracy: {correct / len(testloader.dataset)}')
+        print(f'[TEST] Evaluation Accuracy: {correct / len(testloader.dataset)}')
+
+def plot_sequence(x, y, title, xlabel, ylabel):
+    """
+    """
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.title(title)
+    plt.plot(x, y, label=ylabel, color='blue')
+    plt.legend()
+    plt.show()
 
 def main():
     # Loading all negative & positive samples
@@ -201,12 +232,20 @@ def main():
 
     # Creating the training & testing datasets
     trainloader, testloader = \
-        generate_datasets(negative_samples, positive_samples)
+        generate_datasets(negative_samples, positive_samples, batch_size=BATCH_SIZE)
 
     # Creating the NN based on the dimension of the one-hot encoded samples
     # (we do this on the negative samples, but in reality it's the same dimension for both)
     model = AntigenPredictor(input_dim=negative_samples.shape[1])
-    train_model(model, trainloader)
+
+    # Training
+    train_losses, train_accuracies = train_model(model, trainloader, epochs=EPOCHS, lr=LEARNING_RATE)
+    plot_sequence(
+        range(len(train_losses)), train_losses, 'Training Loss per Epoch', 'Epoch', 'Loss')
+    plot_sequence(
+        range(len(train_accuracies)), train_accuracies, 'Training Accuracy per Epoch', 'Epoch', 'Accuracy')
+    
+    # Testing
     test_model(model, testloader)
 
 if __name__ == "__main__":
