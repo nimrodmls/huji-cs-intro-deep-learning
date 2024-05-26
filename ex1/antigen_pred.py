@@ -14,10 +14,7 @@ BATCH_SIZE = 32
 # Paths for the data files - Change according to the location of the files on your machine
 NEGATIVE_SAMPLE_PATH = "neg_A0201.txt"
 POSITIVE_SAMPLE_PATH = "pos_A0201.txt"
-# The ratio of negative samples to positive samples is 8:1,
-# this will come in handy when creating the training & testing datasets
-# and weighing the loss function
-NEGATIVE_SAMPLES_PER_POSITIVE = 8
+SPIKE_PROTEIN_PATH = "spike.txt"
 
 # The ratio of the training set to the testing set is 10:90
 TRAIN_SET_RATIO = 0.9
@@ -29,6 +26,7 @@ AMINO_ACIDS_DICT = {acid: i for i, acid in enumerate(AMINO_ACIDS)}
 
 class AntigenPredictor(nn.Module):
     """
+    The neural network model for predicting antigen with protein peptides.
     """
     def __init__(self, input_dim):
         super(AntigenPredictor, self).__init__()
@@ -71,6 +69,19 @@ def preprocess_samples(data: List[str]):
             samples[idx, AMINO_ACIDS_DICT[acid] + (acid_idx * len(AMINO_ACIDS))] = 1
 
     return samples
+
+
+def get_spike_dataset():
+    """
+    """
+    spike_data = None
+    with open(SPIKE_PROTEIN_PATH, "r") as f:
+        spike_data = "".join(f.read().replace('\n', ''))
+
+    # Extracting all the 9-mer peptides from the spike protein
+    spike_protein = [spike_data[i:i+9] for i in range(len(spike_data) - 8)]
+
+    return spike_protein
 
 def generate_datasets(negative_samples, positive_samples, batch_size=32):
     """
@@ -188,7 +199,6 @@ def train_model(model, trainloader, epochs=10, lr=0.01):
     return losses, accuracies
 
 def test_model(model, testloader):
-
     """
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -200,23 +210,55 @@ def test_model(model, testloader):
     with torch.no_grad():
         correct = 0
         total_positive = 0
-        correct_positive_preds = 0
+        correct_positive_preds_cnt = 0
         for i, (inputs, labels) in enumerate(tqdm(testloader)):
             inputs = inputs.to(device)
             labels = labels.to(device)
             outputs = model(inputs)
 
+            # Rounding the outputs to 0 or 1 to get the predicted labels
             outputs = outputs.round().squeeze()
 
-            correct_positive_preds += (outputs.int() & labels.int()).sum().item()
+            # Finding all the true positives corresponding to the positive samples
+            correct_positive_preds = outputs.int() & labels.int()
+            # Counting the number of correct positive predictions
+            correct_positive_preds_cnt += (correct_positive_preds).sum().item()
+            # Counting the total number of positive samples
             total_positive += labels.sum().item()
+            # Counting the total number of correct predictions
             correct += (outputs == labels).sum().item()
 
-        print(f'[TEST] Evaluation Recall: {correct_positive_preds / total_positive}')
+        print(f'[TEST] Evaluation Recall: {correct_positive_preds_cnt / total_positive}')
         print(f'[TEST] Evaluation Accuracy: {correct / len(testloader.dataset)}')
+
+def test_spike(model):
+    """
+    """
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model.to(device)
+    print(f'[DEBUG] Using device: {device}')
+
+    print('[SPIKE TEST] Starting evaluation...')
+    model.eval()
+    spike_onehots = preprocess_samples(get_spike_dataset())
+
+    spike_results = torch.zeros(size=(spike_onehots.shape[0],))
+    with torch.no_grad():
+        for i, (inputs) in enumerate(tqdm(spike_onehots)):
+            samples = torch.zeros(size=(1,inputs.shape[0]), device=device)
+            samples[0] = torch.tensor(inputs)
+            outputs = model(samples)
+
+            outputs = outputs.squeeze()
+            spike_results[i] = outputs.item()
+
+    top3_results = spike_results.topk(3)
+    top3_results = {one_hot_to_peptide(spike_onehots[index]): value.item() for index, value in zip(top3_results.indices, top3_results.values)}
+    print(f'[SPIKE TEST] Top 3 peptides: {top3_results}')
 
 def plot_sequence(x, y, title, xlabel, ylabel):
     """
+    Generic plotting
     """
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
@@ -245,6 +287,9 @@ def main():
     # (we do this on the negative samples, but in reality it's the same dimension for both)
     model = AntigenPredictor(input_dim=negative_samples.shape[1])
     model.to(torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
+
+    # Trying to load a pre-trained model if it exists
+    # IMPORTANT: If you wish to retrain the model, delete the antigen_predictor.pth file
     try:
         model.load_state_dict(torch.load('antigen_predictor.pth'))
         print('[DEBUG] Pre-trained model loaded')
@@ -256,10 +301,13 @@ def main():
             range(len(train_losses)), train_losses, 'Training Loss per Epoch', 'Epoch', 'Loss')
         plot_sequence(
             range(len(train_accuracies)), train_accuracies, 'Training Accuracy per Epoch', 'Epoch', 'Accuracy')
-    torch.save(model.state_dict(), 'antigen_predictor.pth')
+        torch.save(model.state_dict(), 'antigen_predictor.pth')
     
     # Testing
     test_model(model, testloader)
+
+    # Testing with the spike set
+    test_spike(model)
 
 if __name__ == "__main__":
     main()
