@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from typing import List
 
 # Hyperparameters
-EPOCHS = 10
+EPOCHS = 20
 LEARNING_RATE = 0.01
 BATCH_SIZE = 32
 
@@ -28,17 +28,21 @@ class AntigenPredictor(nn.Module):
     """
     The neural network model for predicting antigen with protein peptides.
     """
-    def __init__(self, input_dim):
+    def __init__(self, input_dim, inner_layer_dim):
         super(AntigenPredictor, self).__init__()
+        self.inner_layer_dim = inner_layer_dim
         self.net = nn.Sequential(
-            nn.Linear(input_dim, input_dim), nn.ReLU(), # Input layer
+            nn.Linear(input_dim, inner_layer_dim), #nn.ReLU(), # Input layer
             # Creating 2 hidden layers with the same dimension as the input layer
             # as specified in the exercise description
-            nn.Linear(input_dim, input_dim), nn.ReLU(), # Hidden layer 1
-            nn.Linear(input_dim, input_dim), nn.ReLU(), # Hidden layer 2
-            nn.Linear(input_dim, 1), nn.Sigmoid() # Output layer
+            nn.Linear(inner_layer_dim, inner_layer_dim), #nn.ReLU(), # Hidden layer 1
+            nn.Linear(inner_layer_dim, 9), #nn.ReLU(), # Hidden layer 2
+            nn.Linear(9, 1), nn.Sigmoid() # Output layer
         )
 
+    def get_hidden_layer_dim(self):
+        return self.inner_layer_dim
+    
     def forward(self, x):
         return self.net(x)
 
@@ -151,11 +155,12 @@ def generate_datasets(negative_samples, positive_samples, batch_size=32):
 
     return trainloader, testloader
 
-def train_model(model, trainloader, epochs=10, lr=0.01):
+def train_model(model, trainloader, test_loader, epochs=10, lr=0.01):
     """
     Training the model on the training set.
     :param model: The model to train.
     :param trainloader: The training set.
+    :param test_loader: The testing set.
     :param epochs: The number of epochs to train the model.
     :param lr: The learning rate for the optimizer.
     :return: The losses and accuracies of the model during training, for each epoch.
@@ -170,6 +175,9 @@ def train_model(model, trainloader, epochs=10, lr=0.01):
 
     losses = []
     accuracies = []
+    test_losses = []
+    test_accuracies = []
+
     for ep in range(epochs):
 
         print(f'[TRAIN] Epoch: {ep + 1}')
@@ -192,13 +200,17 @@ def train_model(model, trainloader, epochs=10, lr=0.01):
 
         accuracies.append(pred_correct / len(trainloader.dataset))
         losses.append(ep_loss / len(trainloader))
+        
+        test_loss, test_accuracy = test_model(model, test_loader, criterion)
+        test_losses.append(test_loss)
+        test_accuracies.append(test_accuracy)
 
     print('[TRAIN] Final Loss: ', losses[-1])
     print('[TRAIN] Final Accuracy: ', accuracies[-1])
 
-    return losses, accuracies
+    return losses, accuracies, test_losses, test_accuracies
 
-def test_model(model, testloader):
+def test_model(model, testloader, criterion):
     """
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -211,10 +223,14 @@ def test_model(model, testloader):
         correct = 0
         total_positive = 0
         correct_positive_preds_cnt = 0
+        ep_loss = 0
+        
         for i, (inputs, labels) in enumerate(tqdm(testloader)):
             inputs = inputs.to(device)
             labels = labels.to(device)
             outputs = model(inputs)
+
+            loss = criterion(outputs.squeeze(), labels.float())
 
             # Rounding the outputs to 0 or 1 to get the predicted labels
             outputs = outputs.round().squeeze()
@@ -227,9 +243,15 @@ def test_model(model, testloader):
             total_positive += labels.sum().item()
             # Counting the total number of correct predictions
             correct += (outputs == labels).sum().item()
+            ep_loss += loss.item()
 
         print(f'[TEST] Evaluation Recall: {correct_positive_preds_cnt / total_positive}')
         print(f'[TEST] Evaluation Accuracy: {correct / len(testloader.dataset)}')
+
+        accuracy = correct / len(testloader.dataset)
+        loss = ep_loss / len(testloader)
+
+        return loss, accuracy
 
 def test_spike(model):
     """
@@ -256,18 +278,24 @@ def test_spike(model):
     top3_results = {one_hot_to_peptide(spike_onehots[index]): value.item() for index, value in zip(top3_results.indices, top3_results.values)}
     print(f'[SPIKE TEST] Top 3 peptides: {top3_results}')
 
-def plot_sequence(x, y, title, xlabel, ylabel):
+def plot_sequence(x1, y1, label1, x2, y2, label2, title, xlabel, ylabel, model):
     """
     Generic plotting
     """
+    plt.figure()
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.title(title)
-    plt.plot(x, y, label=ylabel, color='blue')
+    plt.plot(x1, y1, label=label1, color='blue')
+    plt.plot(x2, y2, label=label2, color='red')
     plt.legend()
-    plt.show()
+    plt.savefig(f'{title} {model.get_hidden_layer_dim()}.pdf')
 
 def main():
+    # Seed for reproducibility
+    torch.manual_seed(42)
+    np.random.seed(42)
+
     # Loading all negative & positive samples
     negative_samples = None
     with open(NEGATIVE_SAMPLE_PATH, "r") as f:
@@ -285,7 +313,7 @@ def main():
 
     # Creating the NN based on the dimension of the one-hot encoded samples
     # (we do this on the negative samples, but in reality it's the same dimension for both)
-    model = AntigenPredictor(input_dim=negative_samples.shape[1])
+    model = AntigenPredictor(input_dim=negative_samples.shape[1], inner_layer_dim=60)
     model.to(torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
 
     # Trying to load a pre-trained model if it exists
@@ -296,16 +324,15 @@ def main():
     except FileNotFoundError:
         print('[DEBUG] No pre-trained model found, starting training')
         # No pre-trained model exists, so we proceed to training
-        train_losses, train_accuracies = train_model(model, trainloader, epochs=EPOCHS, lr=LEARNING_RATE)
+        train_losses, train_accuracies, test_losses, test_accuracies = train_model(model, trainloader, testloader, epochs=EPOCHS, lr=LEARNING_RATE)
         plot_sequence(
-            range(len(train_losses)), train_losses, 'Training Loss per Epoch', 'Epoch', 'Loss')
+            range(len(train_losses)), train_losses, 'Train', 
+            range(len(test_losses)), test_losses, 'Test', 'Loss per Epoch', 'Epoch', 'Loss', model)
         plot_sequence(
-            range(len(train_accuracies)), train_accuracies, 'Training Accuracy per Epoch', 'Epoch', 'Accuracy')
-        torch.save(model.state_dict(), 'antigen_predictor.pth')
+            range(len(train_accuracies)), train_accuracies, 'Train', 
+            range(len(test_accuracies)), test_accuracies, 'Test', 'Accuracy per Epoch', 'Epoch', 'Accuracy', model)
+        #torch.save(model.state_dict(), 'antigen_predictor.pth')
     
-    # Testing
-    test_model(model, testloader)
-
     # Testing with the spike set
     test_spike(model)
 
