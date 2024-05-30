@@ -212,6 +212,11 @@ def train_model(model, trainloader, test_loader, epochs=10, lr=0.01):
 
 def test_model(model, testloader, criterion):
     """
+    Testing (evaluation mode - No backpropagation) the model on the given testing set.
+    :param model: The model to test.
+    :param testloader: The testing set.
+    :param criterion: The loss function to use.
+    :return: The loss and accuracy of the model on the testing set.
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
@@ -255,6 +260,8 @@ def test_model(model, testloader, criterion):
 
 def test_spike(model):
     """
+    Testing the model on the spike protein dataset.
+    Printing the top 3 peptides with the highest probability of being an antigen.
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
@@ -331,7 +338,7 @@ def main():
         plot_sequence(
             range(len(train_accuracies)), train_accuracies, 'Train', 
             range(len(test_accuracies)), test_accuracies, 'Test', 'Accuracy per Epoch', 'Epoch', 'Accuracy', model)
-        #torch.save(model.state_dict(), 'antigen_predictor.pth')
+        torch.save(model.state_dict(), 'antigen_predictor.pth')
     
     # Testing with the spike set
     test_spike(model)
