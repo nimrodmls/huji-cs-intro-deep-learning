@@ -18,16 +18,19 @@ def load_mnist_data(batch_size=32, target_dir='./data'):
     :param target_dir: The directory where the data will be downloaded
     :return: The train and test data loaders
     """
+    transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor(),
+                                                torchvision.transforms.Normalize(
+                                                    mean=[0.5], std=[0.5])])
     train_set = torchvision.datasets.MNIST(
-        root=target_dir, train=True, download=True, transform=torchvision.transforms.ToTensor())
+        root=target_dir, train=True, download=True, transform=transform)
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, shuffle=True)
     test_set = torchvision.datasets.MNIST(
-        root=target_dir, train=False, download=True, transform=torchvision.transforms.ToTensor())
+        root=target_dir, train=False, download=True, transform=transform)
     test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size, shuffle=True)
 
     return train_loader, test_loader
 
-def test_model(model, testloader, criterion):
+def ae_evaluate(model, testloader, criterion):
     """
     Testing (evaluation mode - No backpropagation) the model on the given testing set.
     :param model: The model to test.
@@ -53,7 +56,7 @@ def test_model(model, testloader, criterion):
 
         return loss
 
-def train_model(
+def ae_train(
         model, 
         train_loader, 
         test_loader, 
@@ -92,9 +95,11 @@ def train_model(
             ep_loss += loss.item()
 
         train_losses.append(ep_loss / len(train_loader))
+        print(f'[TRAIN] Loss: {train_losses[-1]}')
 
         # Making an evaluation run on the current state        
-        test_losses.append(test_model(model, test_loader, loss_criterion))
+        test_losses.append(ae_evaluate(model, test_loader, loss_criterion))
+        print(f'[TEST] Loss: {test_losses[-1]}')
 
     print('[TRAIN] Final Loss: ', train_losses[-1])
 
@@ -108,23 +113,25 @@ def main():
 
     # Hyperparameters
     lr = 0.01
-    epochs = 5
+    epochs = 10
 
     ae_model = models.ConvAutoencoder()
     ae_model.to(device)
     print(f'[DEBUG] Using device: {device}')
-    optimizer = torch.optim.Adam(ae_model.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(ae_model.parameters())#, lr=lr)
     loss_criterion = torch.nn.L1Loss().to(device)
 
     try:
         ae_model.load_state_dict(torch.load('ae_model.pth'))
     except FileNotFoundError:
-        train_losses, test_losses = train_model(ae_model, train, test, optimizer, loss_criterion, epochs)
-        torch.save(ae_model.state_dict(), 'ae_model.pth')
+        train_losses, test_losses = ae_train(ae_model, train, test, optimizer, loss_criterion, epochs)
+        #torch.save(ae_model.state_dict(), 'ae_model.pth')
         
     plt.figure()
-    plt.plot(train_losses, label='Train Loss')
-    plt.plot(test_losses, label='Test Loss')
+    plt.plot(list(range(1, epochs+1)), train_losses, label='Train Loss')
+    plt.plot(list(range(1, epochs+1)), test_losses, label='Test Loss')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
     plt.legend()
     plt.show()
 

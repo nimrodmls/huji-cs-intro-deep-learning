@@ -6,32 +6,31 @@ class ConvEncoder(nn.Module):
     Convolutional encoder for the MNIST dataset.
     """
 
-    def __init__(self, in_channels, latent_dim, mid_dims):
+    def __init__(self, in_channels, latent_dim):
         super(ConvEncoder, self).__init__()
 
         # TODO: Experiment with pooling layers
 
-        #conv_layer = lambda i, o: nn.Conv2d(i, o, kernel_size=3, stride=2, padding=1)
-        #act_layer = lambda i, o: nn.ReLU(True)
-
         # Convolutional part
         self.conv = nn.Sequential(
-            nn.Conv2d(in_channels, 6, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(in_channels, 16, kernel_size=3, stride=2, padding=1),
             nn.ReLU(True),
-            #*[layer(mid_dims[i], mid_dims[i+1]) for i in range(len(mid_dims)-1) for layer in [conv_layer, act_layer]],
-            nn.Conv2d(6, 12, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
             nn.ReLU(True)
         )
 
         # Linear part
         self.linear = nn.Sequential(
             nn.Flatten(),
-            # 7x7 is the dimension of the image after the two convolutions
-            nn.Linear(12 * 7 * 7, latent_dim)
+            # 7x7 is the dimension of the image after the two convolutions with stride=2
+            nn.Linear(32 * 7 * 7, 128),
+            nn.ReLU(True),
+            nn.Linear(128, latent_dim),
+            nn.Tanh()
         )
 
     def forward(self, x):
-        return self.linear(self.conv(x))
+        return self.conv(x)#self.linear(self.conv(x))
     
 class ConvDecoder(nn.Module):
     """
@@ -43,21 +42,23 @@ class ConvDecoder(nn.Module):
 
         # Linear part
         self.linear = nn.Sequential(
-            nn.Linear(latent_dim, 12 * 7 * 7),
-            nn.Unflatten(1, (12, 7, 7))
+            nn.Linear(latent_dim, 128),
+            nn.ReLU(True),
+            nn.Linear(128, 32 * 7 * 7),
+            nn.Unflatten(1, (32, 7, 7))
         )
 
         # Convolutional part
         self.conv = nn.Sequential(
             # Note that the output padding is necessary to restore the correct output size
-            nn.ConvTranspose2d(12, 6, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.ConvTranspose2d(32, 16, kernel_size=3, stride=2, padding=1, output_padding=1),
             nn.ReLU(True),
-            nn.ConvTranspose2d(6, in_channels, kernel_size=3, stride=2, padding=1, output_padding=1),
-            nn.Sigmoid()
+            nn.ConvTranspose2d(16, in_channels, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.Tanh()
         )
 
     def forward(self, x):
-        return self.conv(self.linear(x))
+        return self.conv(x)#self.conv(self.linear(x))
     
 class ConvAutoencoder(nn.Module):
     """
