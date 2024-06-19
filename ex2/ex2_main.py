@@ -105,12 +105,14 @@ def ae_train(
 
     return train_losses, test_losses
 
-def main():
-    # Loading the MNIST dataset (first run may take a little while more)
-    train, test = load_mnist_data()
-
-    ### Q1 - Training & evaluating the simple MNIST AE model
-
+def q1_ae_reconstruction(trainset, testset):
+    """
+    Experimenting with a simple MNIST convolutional autoencoder.
+    The experiment visualizes the training/test losses and the reconstructed images.
+    
+    :param trainset: The training set.
+    :param testset: The testing set.
+    """
     # Hyperparameters
     lr = 0.01
     epochs = 10
@@ -121,20 +123,56 @@ def main():
     optimizer = torch.optim.Adam(ae_model.parameters())#, lr=lr)
     loss_criterion = torch.nn.L1Loss().to(device)
 
+    # Training the model
     try:
         ae_model.load_state_dict(torch.load('ae_model.pth'))
+        print(f'[DEBUG] Model loaded from file')
     except FileNotFoundError:
-        train_losses, test_losses = ae_train(ae_model, train, test, optimizer, loss_criterion, epochs)
-        #torch.save(ae_model.state_dict(), 'ae_model.pth')
+        print(f'[DEBUG] Model file not found, training new model')
+        train_losses, test_losses = ae_train(
+            ae_model, trainset, testset, optimizer, loss_criterion, epochs)
+        torch.save(ae_model.state_dict(), 'ae_model.pth')
+        print(f'[DEBUG] Model saved to file')
         
-    plt.figure()
-    plt.plot(list(range(1, epochs+1)), train_losses, label='Train Loss')
-    plt.plot(list(range(1, epochs+1)), test_losses, label='Test Loss')
-    plt.xlabel('Epochs')
-    plt.ylabel('Loss')
-    plt.legend()
+        plt.figure()
+        plt.plot(list(range(1, epochs+1)), train_losses, label='Train Loss')
+        plt.plot(list(range(1, epochs+1)), test_losses, label='Test Loss')
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
+        plt.legend()
+        plt.show()
+
+    # Evaluating the model - Reconstructing a sample of images from the test set
+    ae_model.eval()
+    reconstructs = None
+    with torch.no_grad():
+        for i, (inputs, labels) in enumerate(testset):
+            inputs = inputs.to(device)
+            reconstructs = ae_model(inputs)
+            break # Visualizing from a single batch of images
+
+    # Visualizing the reconstructed images
+    fig, axs = plt.subplots(2, 8, figsize=(16, 4))
+    axs[0, 0].set_ylabel('Original', rotation=0, labelpad=25)
+    axs[1, 0].set_ylabel('Reconstructed', rotation=0, labelpad=40)
+    for i in range(8):
+        # Visualization
+        axs[0, i].imshow(inputs[i].squeeze().cpu().numpy(), cmap='gray')
+        axs[1, i].imshow(reconstructs[i].squeeze().cpu().numpy(), cmap='gray')
+        # Removing axes ticks, they are insignificant
+        axs[0, i].get_xaxis().set_ticks([])
+        axs[0, i].get_yaxis().set_ticks([])
+        axs[1, i].get_xaxis().set_ticks([])
+        axs[1, i].get_yaxis().set_ticks([])
     plt.show()
 
+def main():
+    # Loading the MNIST dataset (first run may take a little while more)
+    train, test = load_mnist_data()
+
+    ### Q1 - Training & evaluating the simple MNIST AE model
+    q1_ae_reconstruction(train, test)
+    
     ### Q2
 
 if __name__ == "__main__":
