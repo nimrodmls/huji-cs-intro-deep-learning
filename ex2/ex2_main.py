@@ -246,7 +246,7 @@ def q1_ae_reconstruction(trainset, testset):
 
     return ae_model
 
-def q2_ae_classifier(trainset, testset, encoder):
+def q2_ae_classifier(trainset, testset, encoder, fine_tune=False):
     """
     Experimenting with a simple MNIST convolutional autoencoder.
     The experiment visualizes the training/test losses and the reconstructed images.
@@ -254,6 +254,8 @@ def q2_ae_classifier(trainset, testset, encoder):
     :param trainset: The training set.
     :param testset: The testing set.
     :param encoder: The pretrained autoencoder model.
+    :param fine_tune: If True, the encoder will be fine-tuned during training.
+    :return: The trained encoder-classifier model.
     """
     # Hyperparameters
     lr = 0.01
@@ -262,8 +264,10 @@ def q2_ae_classifier(trainset, testset, encoder):
     model = models.ConvEncoderClassifier(encoder)
     model.to(device)
     print(f'[DEBUG] Using device: {device}')
-    # Only training the classifier part of the model - The encoder is pretrained
-    optimizer = torch.optim.Adam(model.fc.parameters())#, lr=lr)
+    # If fine-tuning is off, then only training the classifier part of the model
+    # and using the pretrained encoder. Otherwise, training with all parameters.
+    learnable_params = model.parameters() if fine_tune else model.fc.parameters()
+    optimizer = torch.optim.Adam(learnable_params)#, lr=lr)
     loss_criterion = torch.nn.CrossEntropyLoss().to(device)
 
     # Training the model
@@ -297,6 +301,43 @@ def q2_ae_classifier(trainset, testset, encoder):
     
     return model
 
+def q2_visualize_misclassifications(model, testset):
+    """
+    Visualizing the misclassified images by the model.
+
+    :param model: The model to visualize the misclassifications.
+    :param testset: The testing set.
+    """
+    model.eval()
+    misclass_inputs = []
+    misclass_input_labels = []
+    misclass_outputs = []
+    with torch.no_grad():
+        for i, (inputs, labels) in enumerate(testset):
+            labels = labels.to(device)
+            inputs = inputs.to(device)
+            outputs = model(inputs)
+            
+            misclassified = outputs.argmax(1) != labels
+            misclass_inputs += list(inputs[misclassified])
+            misclass_input_labels += list(labels[misclassified])
+            misclass_outputs += list(outputs.argmax(1)[misclassified])
+
+    # Visualizing the misclassified images
+    fig, axs = plt.subplots(4, 8, figsize=(16, 4))
+    for i in range(min(len(misclass_inputs), 8)):
+        for j in range(4):
+            current_index = ((i+1)*j) + i
+            # Visualization
+            axs[j, i].imshow(misclass_inputs[current_index].squeeze().cpu().numpy(), cmap='gray')
+            axs[j, i].set_title(
+                f'True: {misclass_input_labels[current_index]}\nPredicted: {misclass_outputs[current_index]}', 
+                fontdict={'fontsize': 6})
+            # Removing axes ticks, they are insignificant
+            axs[j, i].get_xaxis().set_ticks([])
+            axs[j, i].get_yaxis().set_ticks([])
+    plt.show()
+
 def main():
     # Loading the MNIST dataset (first run may take a little while more
     train, test = load_mnist_data(batch_size=32)
@@ -306,6 +347,7 @@ def main():
     
     ### Q2 - Training & evaluating a MNIST classifier on the latent space of the AE
     classifier = q2_ae_classifier(train, test, ae_model.encoder)
+    q2_visualize_misclassifications(classifier, test)
     #print(encoder_classifier_evaluate(classifier, test, torch.nn.CrossEntropyLoss()))
 
 if __name__ == "__main__":
