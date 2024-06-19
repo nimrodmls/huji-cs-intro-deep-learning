@@ -14,23 +14,27 @@ class ConvEncoder(nn.Module):
         # Convolutional part
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels, 16, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(16),
             nn.ReLU(True),
             nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(32),
             nn.ReLU(True)
         )
 
-        # Linear part
-        self.linear = nn.Sequential(
+        # Bottleneck part
+        self.bottleneck = nn.Sequential(
+            nn.MaxPool2d(2, 2),
             nn.Flatten(),
-            # 7x7 is the dimension of the image after the two convolutions with stride=2
-            nn.Linear(32 * 7 * 7, 128),
+            # 3x3 is the dimension of the image after the two convolutions & max pool with stride=2
+            nn.Linear(32 * 3 * 3, 128),
+            nn.BatchNorm1d(128),
             nn.ReLU(True),
             nn.Linear(128, latent_dim),
             nn.Tanh()
         )
 
     def forward(self, x):
-        return self.conv(x)#self.linear(self.conv(x))
+        return self.bottleneck(self.conv(x))
     
 class ConvDecoder(nn.Module):
     """
@@ -40,16 +44,16 @@ class ConvDecoder(nn.Module):
     def __init__(self, in_channels, latent_dim):
         super(ConvDecoder, self).__init__()
 
-        # Linear part
-        self.linear = nn.Sequential(
-            nn.Linear(latent_dim, 128),
+        # Bottleneck part
+        self.bottleneck = nn.Sequential(
+            nn.Linear(latent_dim, 32 * 3 * 3),
             nn.ReLU(True),
-            nn.Linear(128, 32 * 7 * 7),
-            nn.Unflatten(1, (32, 7, 7))
+            nn.Unflatten(1, (32, 3, 3))
         )
 
         # Convolutional part
         self.conv = nn.Sequential(
+            nn.ConvTranspose2d(32, 32, kernel_size=3, stride=2),
             # Note that the output padding is necessary to restore the correct output size
             nn.ConvTranspose2d(32, 16, kernel_size=3, stride=2, padding=1, output_padding=1),
             nn.ReLU(True),
@@ -58,7 +62,7 @@ class ConvDecoder(nn.Module):
         )
 
     def forward(self, x):
-        return self.conv(x)#self.conv(self.linear(x))
+        return self.conv(self.bottleneck(x))
     
 class ConvAutoencoder(nn.Module):
     """
@@ -77,22 +81,25 @@ class ConvAutoencoder(nn.Module):
     def forward(self, x):
         return self.decoder(self.encoder(x))
     
-class ConvEncoderMLP(nn.Module):
+class ConvEncoderClassifier(nn.Module):
     """
     Convolutional encoder for the MNIST dataset.
     """
     OUT_DIM = 10 # MNIST has 10 classes
-    HIDDEN_DIM = 20 # Hidden layer dimension
+    HIDDEN_DIM = 128 # Hidden layer dimension
 
-    def __init__(self):
-        super(ConvEncoderMLP, self).__init__()
+    def __init__(self, encoder):
+        super(ConvEncoderClassifier, self).__init__()
 
-        self.encoder = ConvEncoder()
+        self.encoder = encoder
+        #self.translation = nn.Conv2d(32, 64, kernel_size=7)
+        # Fully connected layer for classification
         self.fc = nn.Sequential(
-            nn.Linear(ConvEncoder.LATENT_DIM, ConvEncoderMLP.HIDDEN_DIM),
+            nn.Linear(ConvAutoencoder.LATENT_DIM, ConvEncoderClassifier.HIDDEN_DIM),
+            nn.BatchNorm1d(ConvEncoderClassifier.HIDDEN_DIM),
             nn.ReLU(True),
-            nn.Linear(ConvEncoderMLP.HIDDEN_DIM, ConvEncoderMLP.OUT_DIM),
-            nn.Sigmoid()
+            nn.Linear(ConvEncoderClassifier.HIDDEN_DIM, ConvEncoderClassifier.OUT_DIM),
+            nn.Softmax(1)
         )
 
     def forward(self, x):
