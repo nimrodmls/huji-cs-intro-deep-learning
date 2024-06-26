@@ -95,7 +95,7 @@ class ConvEncoderClassifier(nn.Module):
     OUT_DIM = 10 # MNIST has 10 classes
     HIDDEN_DIM = 128 # Hidden layer dimension
 
-    def __init__(self, encoder):
+    def __init__(self, encoder=None, classifier=None):
         super(ConvEncoderClassifier, self).__init__()
 
         if encoder is not None:
@@ -104,13 +104,16 @@ class ConvEncoderClassifier(nn.Module):
             self.encoder = ConvEncoder(ConvAutoencoder.IN_CHANNELS, ConvAutoencoder.LATENT_DIM)
         #self.translation = nn.Conv2d(32, 64, kernel_size=7)
         # Fully connected layer for classification
-        self.fc = nn.Sequential(
-            nn.Linear(ConvAutoencoder.LATENT_DIM, ConvEncoderClassifier.HIDDEN_DIM),
-            nn.BatchNorm1d(ConvEncoderClassifier.HIDDEN_DIM),
-            nn.ReLU(True),
-            nn.Linear(ConvEncoderClassifier.HIDDEN_DIM, ConvEncoderClassifier.OUT_DIM),
-            nn.Softmax(1)
-        )
+        if classifier is not None:
+            self.fc = classifier
+        else:
+            self.fc = nn.Sequential(
+                nn.Linear(ConvAutoencoder.LATENT_DIM, ConvEncoderClassifier.HIDDEN_DIM),
+                nn.BatchNorm1d(ConvEncoderClassifier.HIDDEN_DIM),
+                nn.ReLU(True),
+                nn.Linear(ConvEncoderClassifier.HIDDEN_DIM, ConvEncoderClassifier.OUT_DIM),
+                nn.Softmax(1)
+            )
 
     def forward(self, x):
         return self.fc(self.encoder(x))

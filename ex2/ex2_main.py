@@ -251,15 +251,15 @@ def q1_ae_reconstruction(trainset, testset):
 
     return ae_model
 
-def q2_ae_classifier(trainset, testset, encoder=None, title='q2', epochs=10):
+def ae_classifier(title, classifier, trainset, testset, epochs=10):
     """
     Experimenting with a simple MNIST convolutional autoencoder.
     The experiment visualizes the training/test losses and the reconstructed images.
     
+    :param title: The title of the experiment.
     :param trainset: The training set.
     :param testset: The testing set.
     :param encoder: The pretrained autoencoder model for fine-tuning.
-    :param title: The title of the experiment.
     :return: The trained encoder-classifier model.
     """
     # Hyperparameters
@@ -267,7 +267,7 @@ def q2_ae_classifier(trainset, testset, encoder=None, title='q2', epochs=10):
     epochs = epochs
 
     # Creating the model with the pretrained encoder or a new encoder
-    model = models.ConvEncoderClassifier(encoder)
+    model = classifier
     model.to(device)
     print(f'[DEBUG] Using device: {device}')
     learnable_params = model.parameters()
@@ -415,8 +415,15 @@ def q4_ae_small_subset_classifier(trainset, testset):
     """
     # Hyperparameters
     epochs = 20
+    classifier = models.ConvEncoderClassifier()
+    return ae_classifier('q4', classifier, trainset, testset, epochs=epochs)
 
-    return q2_ae_classifier(trainset, testset, title='q4', epochs=epochs)
+def q5_transfer_learning(trainset, testset, encoder, classifier):
+    """
+    """
+    model = models.ConvEncoderClassifier(encoder, classifier).to(device)
+
+    return ae_classifier('q5', model, trainset, testset)
 
 def main():
     # Loading the MNIST dataset (first run may take a little while more
@@ -428,9 +435,10 @@ def main():
     
     ### Q2 - Training & evaluating a MNIST classifier on the latent space of the AE
     print('[DEBUG] Q2')
-    classifier = q2_ae_classifier(train, test)
+    classifier = models.ConvEncoderClassifier()
+    classifier = ae_classifier('q2', classifier, train, test)
     q2_visualize_misclassifications(classifier, test)
-    #classifier = q2_ae_classifier(train, test, ae_model.encoder, fine_tune=True)
+    #classifier = models.ConvEncoderClassifier(ae_model.encoder) # Fine-tuning
 
     ### Q3 - Fine-tuning Decoder for better reconstruction
     print('[DEBUG] Q3')
@@ -441,6 +449,13 @@ def main():
     train_small, test_small = load_mnist_data(subset=100, batch_size=32)
     # Using the same classifier as in Q2
     classifier = q4_ae_small_subset_classifier(train_small, test_small)
+
+    ### Q5 - Transfer Learning with fully-trained encoder and mini-trained classifier
+    print('[DEBUG] Q5')
+    # Reloading the autoencoder from Q1, we will take only the encoder part
+    ae_model = models.ConvAutoencoder()
+    ae_model.load_state_dict(torch.load('ae_model_q1.pth'))
+    q5_transfer_learning(train, test, ae_model.encoder, classifier.fc)
 
 if __name__ == "__main__":
     main()
