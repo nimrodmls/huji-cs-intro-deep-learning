@@ -23,10 +23,10 @@ class ConvEncoder(nn.Module):
 
         # Bottleneck part
         self.bottleneck = nn.Sequential(
-            nn.MaxPool2d(2, 2),
+            #nn.MaxPool2d(2, 2),
             nn.Flatten(),
             # 3x3 is the dimension of the image after the two convolutions & max pool with stride=2
-            nn.Linear(32 * 3 * 3, 128),
+            nn.Linear(32 * 7 * 7, 128),
             nn.BatchNorm1d(128),
             nn.ReLU(True),
             nn.Linear(128, latent_dim),
@@ -46,14 +46,14 @@ class ConvDecoder(nn.Module):
 
         # Bottleneck part
         self.bottleneck = nn.Sequential(
-            nn.Linear(latent_dim, 32 * 3 * 3),
+            nn.Linear(latent_dim, 32 * 7 * 7),
             nn.ReLU(True),
-            nn.Unflatten(1, (32, 3, 3))
+            nn.Unflatten(1, (32, 7, 7))
         )
 
         # Convolutional part
         self.conv = nn.Sequential(
-            nn.ConvTranspose2d(32, 32, kernel_size=3, stride=2),
+            #nn.ConvTranspose2d(32, 32, kernel_size=3, stride=2),
             # Note that the output padding is necessary to restore the correct output size
             nn.ConvTranspose2d(32, 16, kernel_size=3, stride=2, padding=1, output_padding=1),
             nn.ReLU(True),
@@ -72,11 +72,18 @@ class ConvAutoencoder(nn.Module):
     IN_CHANNELS = 1 # The MNIST dataset has 1 channel (greyscale images)
     LATENT_DIM = 12 # The dimension of the latent space
 
-    def __init__(self):
+    def __init__(self, encoder=None, decoder=None):
         super(ConvAutoencoder, self).__init__()
 
-        self.encoder = ConvEncoder(ConvAutoencoder.IN_CHANNELS, ConvAutoencoder.LATENT_DIM)
-        self.decoder = ConvDecoder(ConvAutoencoder.IN_CHANNELS, ConvAutoencoder.LATENT_DIM)
+        if encoder is not None:
+            self.encoder = encoder
+        else:
+            self.encoder = ConvEncoder(ConvAutoencoder.IN_CHANNELS, ConvAutoencoder.LATENT_DIM)
+
+        if decoder is not None:
+            self.decoder = decoder
+        else:
+            self.decoder = ConvDecoder(ConvAutoencoder.IN_CHANNELS, ConvAutoencoder.LATENT_DIM)
 
     def forward(self, x):
         return self.decoder(self.encoder(x))
@@ -91,7 +98,10 @@ class ConvEncoderClassifier(nn.Module):
     def __init__(self, encoder):
         super(ConvEncoderClassifier, self).__init__()
 
-        self.encoder = encoder
+        if encoder is not None:
+            self.encoder = encoder
+        else:
+            self.encoder = ConvEncoder(ConvAutoencoder.IN_CHANNELS, ConvAutoencoder.LATENT_DIM)
         #self.translation = nn.Conv2d(32, 64, kernel_size=7)
         # Fully connected layer for classification
         self.fc = nn.Sequential(
