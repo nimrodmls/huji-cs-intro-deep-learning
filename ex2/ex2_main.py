@@ -464,7 +464,7 @@ def main():
     # Reloading the autoencoder from Q1, we will take only the encoder part
     ae_model = models.ConvAutoencoder()
     ae_model.load_state_dict(torch.load('ae_model_q1.pth'))
-    q5_transfer_learning(train, test, ae_model.encoder, classifier.fc)
+    q5_transfer_learning(train_small, test_small, ae_model.encoder, classifier.fc)
 
 if __name__ == "__main__":
     main()
