@@ -384,29 +384,38 @@ def q3_ae_decoder_finetune(trainset, testset, pretrained_encoder):
         plt.legend()
         plt.savefig('q3_autoencoder_loss.pdf')
 
-    # Evaluating the model - Reconstructing a sample of images from the test set
-    ae_model.eval()
-    reconstructs = None
-    with torch.no_grad():
-        for i, (inputs, labels) in enumerate(testset):
-            inputs = inputs.to(device)
-            reconstructs = ae_model(inputs)
-            break # Visualizing from a single batch of images
+    # Loading the Q1 AE model for comparison
+    q1_ae_model = models.ConvAutoencoder().to(device)
+    q1_ae_model.load_state_dict(torch.load('ae_model_q1.pth'))
 
-    # Visualizing the reconstructed images
-    fig, axs = plt.subplots(2, 8, figsize=(16, 4))
-    axs[0, 0].set_ylabel('Original', rotation=0, labelpad=25)
-    axs[1, 0].set_ylabel('Reconstructed', rotation=0, labelpad=40)
-    for i in range(8):
-        # Visualization
-        axs[0, i].imshow(inputs[i].squeeze().cpu().numpy(), cmap='gray')
-        axs[1, i].imshow(reconstructs[i].squeeze().cpu().numpy(), cmap='gray')
-        # Removing axes ticks, they are insignificant
-        axs[0, i].get_xaxis().set_ticks([])
-        axs[0, i].get_yaxis().set_ticks([])
-        axs[1, i].get_xaxis().set_ticks([])
-        axs[1, i].get_yaxis().set_ticks([])
-    plt.savefig('q3_reconstructed_images.pdf')
+    _, new_test_dataset = load_mnist_data(batch_size=64)
+    reconstruct_samples = None
+    for i, (inputs, labels) in enumerate(new_test_dataset):
+        reconstruct_samples = inputs.to(device)
+        break # Visualizing from a single batch of 64 images, the same batch for both models
+
+    for model, title in [(q1_ae_model, "q1_ae"), (ae_model, "q3_ae")]:
+        # Evaluating the model - Reconstructing a sample of images from the test set
+        model.eval()
+        reconstructs = None
+        with torch.no_grad():
+            reconstructs = model(reconstruct_samples)
+
+        # Visualizing the reconstructed images
+        fig, axs = plt.subplots(14, 8)
+        for j in range(7):
+            current_row = j*2
+            for i in range(8):
+                current_column = i + (j*8)
+                # Visualization
+                axs[current_row, i].imshow(inputs[current_column].squeeze().cpu().numpy(), cmap='gray')
+                axs[current_row+1, i].imshow(reconstructs[current_column].squeeze().cpu().numpy(), cmap='gray')
+                # Removing axes ticks, they are insignificant
+                axs[current_row, i].get_xaxis().set_ticks([])
+                axs[current_row, i].get_yaxis().set_ticks([])
+                axs[current_row+1, i].get_xaxis().set_ticks([])
+                axs[current_row+1, i].get_yaxis().set_ticks([])
+        plt.savefig(f'q3_reconstructed_images_{title}.pdf')
 
     return ae_model
 
