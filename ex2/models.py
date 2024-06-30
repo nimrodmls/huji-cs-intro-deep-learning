@@ -9,8 +9,6 @@ class ConvEncoder(nn.Module):
     def __init__(self, in_channels, latent_dim):
         super(ConvEncoder, self).__init__()
 
-        # TODO: Experiment with pooling layers
-
         # Convolutional part
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels, 16, kernel_size=3, stride=2, padding=1),
@@ -23,9 +21,8 @@ class ConvEncoder(nn.Module):
 
         # Bottleneck part
         self.bottleneck = nn.Sequential(
-            #nn.MaxPool2d(2, 2),
             nn.Flatten(),
-            # 3x3 is the dimension of the image after the two convolutions & max pool with stride=2
+            # 7x7 is the dimension of the image after the two convolutions with stride=2
             nn.Linear(32 * 7 * 7, 128),
             nn.BatchNorm1d(128),
             nn.ReLU(True),
@@ -53,7 +50,6 @@ class ConvDecoder(nn.Module):
 
         # Convolutional part
         self.conv = nn.Sequential(
-            #nn.ConvTranspose2d(32, 32, kernel_size=3, stride=2),
             # Note that the output padding is necessary to restore the correct output size
             nn.ConvTranspose2d(32, 16, kernel_size=3, stride=2, padding=1, output_padding=1),
             nn.ReLU(True),
@@ -102,7 +98,6 @@ class ConvEncoderClassifier(nn.Module):
             self.encoder = encoder
         else:
             self.encoder = ConvEncoder(ConvAutoencoder.IN_CHANNELS, ConvAutoencoder.LATENT_DIM)
-        #self.translation = nn.Conv2d(32, 64, kernel_size=7)
         # Fully connected layer for classification
         if classifier is not None:
             self.fc = classifier

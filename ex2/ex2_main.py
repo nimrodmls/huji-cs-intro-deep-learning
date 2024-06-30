@@ -348,6 +348,7 @@ def q2_visualize_misclassifications(model, testset):
 
 def q3_ae_decoder_finetune(trainset, testset, pretrained_encoder):
     """
+    Fine-tuning the decoder for reconstruction with the pretrained encoder.
     """
     # Hyperparameters
     lr = 0.01
@@ -421,6 +422,7 @@ def q3_ae_decoder_finetune(trainset, testset, pretrained_encoder):
 
 def q4_ae_small_subset_classifier(trainset, testset):
     """
+    Implementing Q4
     """
     # Hyperparameters
     epochs = 20
@@ -429,6 +431,7 @@ def q4_ae_small_subset_classifier(trainset, testset):
 
 def q5_transfer_learning(trainset, testset, encoder, classifier):
     """
+    Implementing Q5
     """
     model = models.ConvEncoderClassifier(encoder, classifier).to(device)
 
@@ -447,7 +450,6 @@ def main():
     classifier = models.ConvEncoderClassifier()
     classifier = ae_classifier('q2', classifier, train, test)
     q2_visualize_misclassifications(classifier, test)
-    #classifier = models.ConvEncoderClassifier(ae_model.encoder) # Fine-tuning
 
     ### Q3 - Fine-tuning Decoder for better reconstruction
     print('[DEBUG] Q3')
