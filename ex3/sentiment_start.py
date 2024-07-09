@@ -25,6 +25,21 @@ train_dataset, test_dataset, num_words, input_size = ld.get_data_set(batch_size)
 # Setting device to be used across the board
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+def simplify_labels(labels):
+    """
+    Producing the vector of positives-negatives, where 1 is positive and 0 is negative
+    from the original labels of [1,0] (Positive) & [0,1] (Negative)
+    """
+    return (labels == torch.tensor([1.0, 0.0], device=device)).all(axis=1).type(torch.int)
+
+def get_prediction_vector(output_vec):
+    """
+    Producing the vector of positives-negatives, where 1 is positive and 0 is negative
+    from the output vector of a model
+    """
+    # E.g. where the first element is the highest, it is a positive review
+    return torch.where(torch.argmax(output_vec, axis=1) == 0, 1.0, 0.0)
+
 # Special matrix multipication layer (like torch.Linear but can operate on arbitrary sized
 # tensors and considers its last two indices as the matrix.)
 class MatMul(nn.Module):
@@ -122,7 +137,6 @@ class ExGRU(nn.Module):
     def init_hidden(self, bs):
         return torch.zeros(bs, self.hidden_size).to(device)
 
-
 class ExMLP(nn.Module):
     def __init__(self, input_size, output_size, hidden_size):
         super(ExMLP, self).__init__()
@@ -195,13 +209,23 @@ class ExLRestSelfAtten(nn.Module):
         return x, atten_weights
 
 
-# prints portion of the review (20-30 first words), with the sub-scores each work obtained
-# prints also the final scores, the softmaxed prediction values and the true label values
-
 def print_review(rev_text, sbs1, sbs2, lbl1, lbl2):
-            
-    # implement
-    pass
+    """
+    Prints portion of the review (20-30 first words), with the sub-scores each word obtained
+    prints also the final scores, the softmaxed prediction values and the true label values
+    """
+    word_cnt = 30
+    print(f'Review: {" ".join(rev_text[:word_cnt])}')
+    sbs1 = nn.functional.sigmoid(torch.tensor(sbs1))
+    sbs2 = nn.functional.sigmoid(torch.tensor(sbs2))
+    print('Sub-scores:')
+    for word, s1, s2 in zip(rev_text[:word_cnt], sbs1[:word_cnt], sbs2[:word_cnt]):
+        print(f'\t{word}: Positive: {s1:.4f}, Negative: {s2:.4f}')
+    final_scores = torch.tensor([torch.mean(sbs1), torch.mean(sbs2)])
+    print(f'Final Scores: Positive: {final_scores[0]:.4f}, Negative: {final_scores[1]:.4f}')
+    get_label = lambda pred: 'Positive' if pred[0] == 1.0 else 'Negative'
+    print(f'Prediction: {get_label(get_prediction_vector(final_scores[None, :]))}, '
+          f'True: {get_label(simplify_labels(torch.tensor([[lbl1, lbl2]], device=device)))}')
 
 def model_experiment(model):
     model.to(device)
@@ -275,14 +299,17 @@ def model_experiment(model):
                 loss.backward()
                 optimizer.step()
 
-            correct_preds = (torch.argmax(labels, axis=1) == torch.argmax(output, axis=1)).sum().item()
+            # Simplified, binary labels & predictions representation
+            simple_labels = simplify_labels(labels)
+            pred_vec = get_prediction_vector(output)
+            correct_preds = (simple_labels == pred_vec).sum().item()
             
             if test_iter:
                 test_loss = 0.8 * float(loss.detach()) + 0.2 * test_loss # averaged losses
                 correct_test += correct_preds
                 total_test += labels.shape[0]
-                true_positives += torch.argmax(labels[torch.argmax(output, axis=1) == 1], axis=1).sum().item()
-                false_negatives += torch.argmax(labels[torch.argmax(output, axis=1) == 0], axis=1).sum().item()
+                true_positives += pred_vec.sum().item()
+                false_negatives += simple_labels[pred_vec == 0.0].sum().item() # Counting the amount of misclassifications
             else:
                 train_loss = 0.9 * float(loss.detach()) + 0.1 * train_loss # averaged losses
                 correct_train += correct_preds
@@ -301,7 +328,7 @@ def model_experiment(model):
                 if not run_recurrent:
                     nump_subs = sub_score.cpu().detach().numpy()
                     labels = labels.cpu().detach().numpy()
-                    print_review(reviews_text[0], nump_subs[0,:,0], nump_subs[0,:,1], labels[0,0], labels[0,1])
+                    #print_review(reviews_text[0], nump_subs[0,:,0], nump_subs[0,:,1], labels[0,0], labels[0,1])
 
                 # saving the model
                 torch.save(model, f'model_{model.name()}.pth')
@@ -347,12 +374,12 @@ def main():
 
     # Running experimentation for each model superclass
     for model in [
-                  #ExRNN(input_size, output_size, hidden_size), 
-                  #ExGRU(input_size, output_size, hidden_size),
+                  ExRNN(input_size, output_size, hidden_size), 
+                  ExGRU(input_size, output_size, hidden_size),
                   ExMLP(input_size, output_size, hidden_size), 
                   #ExLRestSelfAtten(input_size, output_size, hidden_size)
                 ]:
-        pass # model_experiment(model)
+        model_experiment(model)
 
     # Plotting the results
     plot_results([("train_losses_RNN.pth", "RNN - Train"), 
