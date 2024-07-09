@@ -4,6 +4,7 @@ from torch.nn.functional import pad
 import torch.nn as nn
 import numpy as np
 import loader as ld
+import matplotlib.pyplot as plt
 
 batch_size = 32
 output_size = 2
@@ -26,7 +27,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Special matrix multipication layer (like torch.Linear but can operate on arbitrary sized
 # tensors and considers its last two indices as the matrix.)
-
 class MatMul(nn.Module):
     def __init__(self, in_channels, out_channels, use_bias = True):
         super(MatMul, self).__init__()
@@ -39,7 +39,7 @@ class MatMul(nn.Module):
     def forward(self, x):        
         x = torch.matmul(x,self.matrix) 
         if self.use_bias:
-            x = x+ self.bias 
+            x = x + self.bias 
         return x
         
 class ExRNN(nn.Module):
@@ -50,8 +50,6 @@ class ExRNN(nn.Module):
         # TODO: Remove
         #self.sigmoid = torch.sigmoid
 
-        # RNN Cell weights
-        
         # TODO: Experiment with in2out
         # Cell FC, generating hidden state for the next step
         self.in2hidden = nn.Linear(input_size + hidden_size, hidden_size)
@@ -79,29 +77,50 @@ class ExRNN(nn.Module):
     def init_hidden(self, bs):
         return torch.zeros(bs, self.hidden_size).to(device)
 
-# Implements GRU Unit
-
 class ExGRU(nn.Module):
     def __init__(self, input_size, output_size, hidden_size):
         super(ExGRU, self).__init__()
         self.hidden_size = hidden_size
+
         # GRU Cell weights
-        # self.something =
-        # etc ...
+        # Reset gate (r)
+        self.reset = nn.Sequential(
+            nn.Linear(input_size + hidden_size, hidden_size),
+            nn.Sigmoid()
+        )
+
+        # Update gate (z)
+        self.update = nn.Sequential(
+            nn.Linear(input_size + hidden_size, hidden_size),
+            nn.Sigmoid()
+        )
+
+        # Hidden Candidate (h)
+        self.hidden_cand = nn.Sequential(
+            nn.Linear(input_size + hidden_size, hidden_size),
+            nn.Tanh()
+        )
+
+        self.output_layer = nn.Linear(hidden_size, output_size)
 
     def name(self):
         return "GRU"
 
     def forward(self, x, hidden_state):
+        layer_in = torch.cat((x, hidden_state), 1)
 
-        # Implementation of GRU cell
+        # Intermediary calculations of the GRU cell
+        update_out = self.update(layer_in)
+        hidden_candidate = self.hidden_cand(torch.cat((x, self.reset(layer_in) * hidden_state), 1))
 
-        # missing implementation
+        # Determining the new hidden state & the output accordingly
+        new_hidden_state = (hidden_state * update_out) + ((1 - update_out) * hidden_candidate)
+        output = self.output_layer(new_hidden_state)
 
-        return output, hidden
+        return output, new_hidden_state
 
-    def init_hidden(self):
-        return torch.zeros(bs, self.hidden_size)
+    def init_hidden(self, bs):
+        return torch.zeros(bs, self.hidden_size).to(device)
 
 
 class ExMLP(nn.Module):
@@ -204,11 +223,19 @@ def model_experiment(model):
 
     train_losses = []
     test_losses = []
+    train_accuracy = []
+    test_accuracy = []
 
     # training steps in which a test step is executed every test_interval
     for epoch in range(num_epochs):
 
         itr = 0 # iteration counter within each epoch
+
+        # Accumalating correct predictions for accuracy calculation
+        correct_train = 0
+        total_train = 0
+        correct_test = 0
+        total_test = 0
 
         for labels, reviews, reviews_text in train_dataset:   # getting training batches
             labels.to(device)
@@ -250,18 +277,28 @@ def model_experiment(model):
                 loss.backward()
                 optimizer.step()
 
+            correct_preds = (torch.argmax(labels, axis=1) == torch.argmax(output, axis=1)).sum().item()
             # averaged losses
             if test_iter:
                 test_loss = 0.8 * float(loss.detach()) + 0.2 * test_loss
+                correct_test += correct_preds
+                total_test += labels.shape[0]
             else:
                 train_loss = 0.9 * float(loss.detach()) + 0.1 * train_loss
+                correct_train += correct_preds
+                total_train += labels.shape[0]
 
             if test_iter:
+                true_positive = torch.argmax(labels[torch.argmax(output, axis=1) == 1], axis=1).sum().item()
+                false_negative = torch.argmax(labels[torch.argmax(output, axis=1) == 0], axis=1).sum().item()
                 print(
                     f"Epoch [{epoch + 1}/{num_epochs}], "
                     f"Step [{itr + 1}/{len(train_dataset)}], "
                     f"Train Loss: {train_loss:.4f}, "
-                    f"Test Loss: {test_loss:.4f}"
+                    f"Test Loss: {test_loss:.4f}, "
+                    f"Train Accuracy: {correct_train / total_train:.4f}, "
+                    f"Test Accuracy: {correct_test / total_test:.4f}, "
+                    f"Recall: {true_positive / (true_positive + false_negative):.4f}, "
                 )
 
                 if not run_recurrent:
@@ -274,33 +311,57 @@ def model_experiment(model):
 
         train_losses.append(train_loss)
         test_losses.append(test_loss)
+        train_accuracy.append(correct_train / total_train)
+        test_accuracy.append(correct_test / total_test)
 
-    train_losses = torch.tensor(train_losses)
-    test_losses = torch.tensor(test_losses)
+    # Saving the final results
     torch.save(train_losses, f"train_losses_{model.name()}.pth")
     torch.save(test_losses, f"test_losses_{model.name()}.pth")
+    torch.save(train_accuracy, f"train_accuracy_{model.name()}.pth")
+    torch.save(test_accuracy, f"test_accuracy_{model.name()}.pth")
+
+def plot_results(data, title, xlabel, ylabel, filename):
+    """
+    """
+    plt.figure()
+    for x, description in data:
+        x = torch.load(x)
+        plt.plot(x, label=description)
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.legend()
+    plt.savefig(filename)
 
 def main():
     # select model to use
-    if run_recurrent:
-        if use_RNN:
-            model = ExRNN(input_size, output_size, hidden_size)
-        else:
-            model = ExGRU(input_size, output_size, hidden_size)
-    else:
-        if atten_size > 0:
-            model = ExLRestSelfAtten(input_size, output_size, hidden_size)
-        else:
-            model = ExMLP(input_size, output_size, hidden_size)
-
-    model_experiment(model)
+    # if run_recurrent:
+    #     if use_RNN:
+    #         model = ExRNN(input_size, output_size, hidden_size)
+    #     else:
+    #         model = ExGRU(input_size, output_size, hidden_size)
+    # else:
+    #     if atten_size > 0:
+    #         model = ExLRestSelfAtten(input_size, output_size, hidden_size)
+    #     else:
+    #         model = ExMLP(input_size, output_size, hidden_size)
 
     # Running experimentation for each model superclass
-    # for model in [ExRNN(input_size, output_size, hidden_size), 
-    #               ExGRU(input_size, output_size, hidden_size), 
-    #               ExMLP(input_size, output_size, hidden_size), 
-    #               ExLRestSelfAtten(input_size, output_size, hidden_size)]:
-    #     model_experiment(model)
+    for model in [
+                  ExRNN(input_size, output_size, hidden_size), 
+                  ExGRU(input_size, output_size, hidden_size)
+                  #ExMLP(input_size, output_size, hidden_size), 
+                  #ExLRestSelfAtten(input_size, output_size, hidden_size)
+                ]:
+        model_experiment(model)
+
+    # Plotting the results
+    plot_results([("train_losses_RNN.pth", "RNN"), 
+                  ("train_losses_GRU.pth", "GRU")], 
+                  "Training Losses: GRU vs. RNN", "Epochs", "Loss", "train_losses_RNN_GRU.pdf")
+    plot_results([("train_accuracy_RNN.pth", "RNN"), 
+                  ("train_accuracy_GRU.pth", "GRU")],
+                  "Training Accuracy: GRU vs. RNN", "Epochs", "Accuracy", "train_accuracy_RNN_GRU.pdf")
 
 if __name__ == '__main__':
     main()
