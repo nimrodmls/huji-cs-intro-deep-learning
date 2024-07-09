@@ -258,6 +258,7 @@ def model_experiment(model):
         total_train = 0
         correct_test = 0
         total_test = 0
+        total_test_batches = 0
         train_ep_loss = 0
         test_ep_loss = 0
 
@@ -308,6 +309,7 @@ def model_experiment(model):
                 test_ep_loss += loss.item()
                 correct_test += correct_preds
                 total_test += labels.shape[0]
+                total_test_batches += 1
                 true_positives += pred_vec.sum().item()
                 false_negatives += simple_labels[pred_vec == 0.0].sum().item() # Counting the amount of misclassifications
             else:
@@ -334,7 +336,7 @@ def model_experiment(model):
                 torch.save(model, f'model_{model.name()}.pth')
 
         train_losses.append(train_ep_loss / len(train_dataset))
-        test_losses.append(test_ep_loss / total_test) # For now, not using the test set in batches, but one each time
+        test_losses.append(test_ep_loss / total_test_batches) # For now using only one batch at a time
         train_accuracy.append(correct_train / total_train)
         test_accuracy.append(correct_test / total_test)
 
