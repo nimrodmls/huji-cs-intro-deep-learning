@@ -241,9 +241,6 @@ def model_experiment(model):
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-    train_loss = 1.0
-    test_loss = 1.0
-
     train_losses = []
     test_losses = []
     train_accuracy = []
@@ -261,6 +258,8 @@ def model_experiment(model):
         total_train = 0
         correct_test = 0
         total_test = 0
+        train_ep_loss = 0
+        test_ep_loss = 0
 
         for labels, reviews, reviews_text in train_dataset:   # getting training batches
             labels.to(device)
@@ -306,13 +305,13 @@ def model_experiment(model):
             correct_preds = (simple_labels == pred_vec).sum().item()
             
             if test_iter:
-                test_loss = 0.8 * float(loss.detach()) + 0.2 * test_loss # averaged losses
+                test_ep_loss += loss.item()
                 correct_test += correct_preds
                 total_test += labels.shape[0]
                 true_positives += pred_vec.sum().item()
                 false_negatives += simple_labels[pred_vec == 0.0].sum().item() # Counting the amount of misclassifications
             else:
-                train_loss = 0.9 * float(loss.detach()) + 0.1 * train_loss # averaged losses
+                train_ep_loss += loss.item()
                 correct_train += correct_preds
                 total_train += labels.shape[0]
 
@@ -320,8 +319,8 @@ def model_experiment(model):
                 print(
                     f"Epoch [{epoch + 1}/{num_epochs}], "
                     f"Step [{itr + 1}/{len(train_dataset)}], "
-                    f"Train Loss: {train_loss:.4f}, "
-                    f"Test Loss: {test_loss:.4f}, "
+                    f"Train Loss: {loss.item():.4f}, "
+                    f"Test Loss: {loss.item():.4f}, "
                     f"Train Accuracy: {correct_train / total_train:.4f}, "
                     f"Test Accuracy: {correct_test / total_test:.4f}"
                 )
@@ -334,8 +333,8 @@ def model_experiment(model):
                 # saving the model
                 torch.save(model, f'model_{model.name()}.pth')
 
-        train_losses.append(train_loss)
-        test_losses.append(test_loss)
+        train_losses.append(train_ep_loss / len(train_dataset))
+        test_losses.append(test_ep_loss / total_test) # For now, not using the test set in batches, but one each time
         train_accuracy.append(correct_train / total_train)
         test_accuracy.append(correct_test / total_test)
 
@@ -375,10 +374,10 @@ def main():
 
     # Running experimentation for each model superclass
     for model in [
-                  #ExRNN(input_size, output_size, hidden_size), 
-                  #ExGRU(input_size, output_size, hidden_size),
-                  #ExMLP(input_size, output_size, hidden_size), 
-                  #ExLRestSelfAtten(input_size, output_size, hidden_size)
+                  ExRNN(input_size, output_size, hidden_size), 
+                  ExGRU(input_size, output_size, hidden_size),
+                  ExMLP(input_size, output_size, hidden_size), 
+                  ExLRestSelfAtten(input_size, output_size, hidden_size)
                 ]:
         model_experiment(model)
 
