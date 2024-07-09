@@ -10,8 +10,8 @@ batch_size = 32
 output_size = 2
 hidden_size = 64        # to experiment with
 
-run_recurrent = True    # else run Token-wise MLP
-use_RNN = True          # otherwise GRU
+run_recurrent = False    # else run Token-wise MLP
+use_RNN = False          # otherwise GRU
 atten_size = 0          # atten > 0 means using restricted self atten
 
 reload_model = False
@@ -130,23 +130,17 @@ class ExMLP(nn.Module):
         self.ReLU = torch.nn.ReLU()
 
         # Token-wise MLP network weights
-        self.layer1 = MatMul(input_size,hidden_size)
-        # additional layer(s)
-        
+        self.fc = nn.Sequential(
+            MatMul(input_size, hidden_size),
+            nn.ReLU(),
+            MatMul(hidden_size, output_size)
+        )
 
     def name(self):
         return "MLP"
 
     def forward(self, x):
-
-        # Token-wise MLP network implementation
-        
-        x = self.layer1(x)
-        x = self.ReLU(x)
-        # rest
-
-        return x
-
+        return self.fc(x)
 
 class ExLRestSelfAtten(nn.Module):
     def __init__(self, input_size, output_size, hidden_size):
@@ -160,8 +154,13 @@ class ExLRestSelfAtten(nn.Module):
         
         # Token-wise MLP + Restricted Attention network implementation
 
-        self.layer1 = MatMul(input_size,hidden_size)
+        self.encoding = nn.Sequential(
+            MatMul(input_size,hidden_size),
+            nn.ReLU(),
+        )
         self.W_q = MatMul(hidden_size, hidden_size, use_bias=False)
+        self.W_k = MatMul(hidden_size, hidden_size, use_bias=False)
+        self.W_v = MatMul(hidden_size, hidden_size, use_bias=False)
         # rest ...
 
 
@@ -169,15 +168,12 @@ class ExLRestSelfAtten(nn.Module):
         return "MLP_atten"
 
     def forward(self, x):
+        x = self.encoding(x)
 
-        # Token-wise MLP + Restricted Attention network implementation
-
-        x = self.layer1(x)
-        x = self.ReLU(x)
+        ## Attention Layer
 
         # generating x in offsets between -atten_size and atten_size 
         # with zero padding at the ends
-
         padded = pad(x,(0,0,atten_size,atten_size,0,0))
 
         x_nei = []
@@ -191,9 +187,9 @@ class ExLRestSelfAtten(nn.Module):
 
         # Applying attention layer
 
-        # query = ...
-        # keys = ...
-        # vals = ...
+        query = self.W_q(x_nei)
+        keys = ...
+        vals = ...
 
 
         return x, atten_weights
@@ -225,6 +221,8 @@ def model_experiment(model):
     test_losses = []
     train_accuracy = []
     test_accuracy = []
+    true_positives = 0
+    false_negatives = 0
 
     # training steps in which a test step is executed every test_interval
     for epoch in range(num_epochs):
@@ -278,32 +276,31 @@ def model_experiment(model):
                 optimizer.step()
 
             correct_preds = (torch.argmax(labels, axis=1) == torch.argmax(output, axis=1)).sum().item()
-            # averaged losses
+            
             if test_iter:
-                test_loss = 0.8 * float(loss.detach()) + 0.2 * test_loss
+                test_loss = 0.8 * float(loss.detach()) + 0.2 * test_loss # averaged losses
                 correct_test += correct_preds
                 total_test += labels.shape[0]
+                true_positives += torch.argmax(labels[torch.argmax(output, axis=1) == 1], axis=1).sum().item()
+                false_negatives += torch.argmax(labels[torch.argmax(output, axis=1) == 0], axis=1).sum().item()
             else:
-                train_loss = 0.9 * float(loss.detach()) + 0.1 * train_loss
+                train_loss = 0.9 * float(loss.detach()) + 0.1 * train_loss # averaged losses
                 correct_train += correct_preds
                 total_train += labels.shape[0]
 
             if test_iter:
-                true_positive = torch.argmax(labels[torch.argmax(output, axis=1) == 1], axis=1).sum().item()
-                false_negative = torch.argmax(labels[torch.argmax(output, axis=1) == 0], axis=1).sum().item()
                 print(
                     f"Epoch [{epoch + 1}/{num_epochs}], "
                     f"Step [{itr + 1}/{len(train_dataset)}], "
                     f"Train Loss: {train_loss:.4f}, "
                     f"Test Loss: {test_loss:.4f}, "
                     f"Train Accuracy: {correct_train / total_train:.4f}, "
-                    f"Test Accuracy: {correct_test / total_test:.4f}, "
-                    f"Recall: {true_positive / (true_positive + false_negative):.4f}, "
+                    f"Test Accuracy: {correct_test / total_test:.4f}"
                 )
 
                 if not run_recurrent:
-                    nump_subs = sub_score.detach().numpy()
-                    labels = labels.detach().numpy()
+                    nump_subs = sub_score.cpu().detach().numpy()
+                    labels = labels.cpu().detach().numpy()
                     print_review(reviews_text[0], nump_subs[0,:,0], nump_subs[0,:,1], labels[0,0], labels[0,1])
 
                 # saving the model
@@ -314,6 +311,8 @@ def model_experiment(model):
         train_accuracy.append(correct_train / total_train)
         test_accuracy.append(correct_test / total_test)
 
+    print(f'{model.name()} - Recall: {true_positives / (true_positives + false_negatives):.4f}, '
+          f'Test Accuracy: {test_accuracy[-1]:.4f}, Test Loss: {test_losses[-1]:.4f}')
     # Saving the final results
     torch.save(train_losses, f"train_losses_{model.name()}.pth")
     torch.save(test_losses, f"test_losses_{model.name()}.pth")
@@ -348,20 +347,30 @@ def main():
 
     # Running experimentation for each model superclass
     for model in [
-                  ExRNN(input_size, output_size, hidden_size), 
-                  ExGRU(input_size, output_size, hidden_size)
-                  #ExMLP(input_size, output_size, hidden_size), 
+                  #ExRNN(input_size, output_size, hidden_size), 
+                  #ExGRU(input_size, output_size, hidden_size),
+                  ExMLP(input_size, output_size, hidden_size), 
                   #ExLRestSelfAtten(input_size, output_size, hidden_size)
                 ]:
-        model_experiment(model)
+        pass # model_experiment(model)
 
     # Plotting the results
-    plot_results([("train_losses_RNN.pth", "RNN"), 
-                  ("train_losses_GRU.pth", "GRU")], 
-                  "Training Losses: GRU vs. RNN", "Epochs", "Loss", "train_losses_RNN_GRU.pdf")
-    plot_results([("train_accuracy_RNN.pth", "RNN"), 
-                  ("train_accuracy_GRU.pth", "GRU")],
-                  "Training Accuracy: GRU vs. RNN", "Epochs", "Accuracy", "train_accuracy_RNN_GRU.pdf")
+    plot_results([("train_losses_RNN.pth", "RNN - Train"), 
+                  ('test_losses_RNN.pth', "RNN - Test"),
+                  ("train_losses_GRU.pth", "GRU - Train"),
+                  ('test_losses_GRU.pth', "GRU - Test")], 
+                  "Losses: GRU vs. RNN", "Epochs", "Loss", "losses_RNN_GRU.pdf")
+    plot_results([("train_accuracy_RNN.pth", "RNN - Train"), 
+                  ("test_accuracy_RNN.pth", "RNN - Test"),
+                  ("train_accuracy_GRU.pth", "GRU - Train"),
+                  ("test_accuracy_GRU.pth", "GRU - Test")],
+                  "Accuracy: GRU vs. RNN", "Epochs", "Accuracy", "accuracy_RNN_GRU.pdf")
+    plot_results([("train_losses_MLP.pth", "MLP - Train"), 
+                  ('test_losses_MLP.pth', "MLP - Test")], 
+                  "Losses: MLP", "Epochs", "Loss", "losses_MLP.pdf")
+    plot_results([("train_accuracy_MLP.pth", "MLP - Train"), 
+                  ("test_accuracy_MLP.pth", "MLP - Test")],
+                   "Accuracy: MLP", "Epochs", "Accuracy", "accuracy_MLP.pdf")
 
 if __name__ == '__main__':
     main()
