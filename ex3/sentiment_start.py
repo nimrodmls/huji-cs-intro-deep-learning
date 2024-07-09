@@ -12,7 +12,7 @@ hidden_size = 64        # to experiment with
 
 run_recurrent = False    # else run Token-wise MLP
 use_RNN = False          # otherwise GRU
-atten_size = 0          # atten > 0 means using restricted self atten
+atten_size = 2 # Restricted self attention configured to context of 2 words to the left & right each
 
 reload_model = False
 num_epochs = 10
@@ -163,7 +163,6 @@ class ExLRestSelfAtten(nn.Module):
         self.input_size = input_size
         self.output_size = output_size
         self.sqrt_hidden_size = np.sqrt(float(hidden_size))
-        self.ReLU = torch.nn.ReLU()
         self.softmax = torch.nn.Softmax(2)
         
         # Token-wise MLP + Restricted Attention network implementation
@@ -172,19 +171,20 @@ class ExLRestSelfAtten(nn.Module):
             MatMul(input_size,hidden_size),
             nn.ReLU(),
         )
+
         self.W_q = MatMul(hidden_size, hidden_size, use_bias=False)
         self.W_k = MatMul(hidden_size, hidden_size, use_bias=False)
         self.W_v = MatMul(hidden_size, hidden_size, use_bias=False)
-        # rest ...
 
+        self.output_layer = nn.Sequential(
+            MatMul(hidden_size, output_size)
+        )
 
     def name(self):
         return "MLP_atten"
 
     def forward(self, x):
         x = self.encoding(x)
-
-        ## Attention Layer
 
         # generating x in offsets between -atten_size and atten_size 
         # with zero padding at the ends
@@ -199,15 +199,18 @@ class ExLRestSelfAtten(nn.Module):
         
         # x_nei has an additional axis that corresponds to the offset
 
-        # Applying attention layer
+        ## Applying attention layer
 
-        query = self.W_q(x_nei)
-        keys = ...
-        vals = ...
+        query = self.W_q(x)
+        keys = self.W_k(x_nei)
+        vals = self.W_v(x_nei)
 
+        keys_T = keys.transpose(2, 3)
+        # Calculating the D parameter, note the addition of extra axis for the offset
+        d = torch.matmul(query[:, :, None, :], keys_T) / self.sqrt_hidden_size
+        atten_weights = self.softmax(d)
 
-        return x, atten_weights
-
+        return self.output_layer(torch.matmul(atten_weights, vals)).squeeze(), atten_weights
 
 def print_review(rev_text, sbs1, sbs2, lbl1, lbl2):
     """
@@ -274,18 +277,16 @@ def model_experiment(model):
                 test_iter = False
 
             # Recurrent nets (RNN/GRU)
-            if run_recurrent:
+            if model.name() in ["RNN", "GRU"]:
                 hidden_state = model.init_hidden(int(labels.shape[0]))
 
                 for i in range(num_words):
                     output, hidden_state = model(reviews[:,i,:], hidden_state)  # HIDE
             else:  # Token-wise networks (MLP / MLP + Atten.)
                 sub_score = []
-                if atten_size > 0:  
-                    # MLP + atten
+                if model.name() == 'MLP_atten': # MLP + atten
                     sub_score, atten_weights = model(reviews)
-                else:               
-                    # MLP
+                else: # MLP
                     sub_score = model(reviews)
 
                 output = torch.mean(sub_score, 1)
@@ -325,7 +326,7 @@ def model_experiment(model):
                     f"Test Accuracy: {correct_test / total_test:.4f}"
                 )
 
-                if not run_recurrent:
+                if model.name() not in ['RNN', 'GRU']:
                     nump_subs = sub_score.cpu().detach().numpy()
                     labels = labels.cpu().detach().numpy()
                     #print_review(reviews_text[0], nump_subs[0,:,0], nump_subs[0,:,1], labels[0,0], labels[0,1])
@@ -374,9 +375,9 @@ def main():
 
     # Running experimentation for each model superclass
     for model in [
-                  ExRNN(input_size, output_size, hidden_size), 
-                  ExGRU(input_size, output_size, hidden_size),
-                  ExMLP(input_size, output_size, hidden_size), 
+                  #ExRNN(input_size, output_size, hidden_size), 
+                  #ExGRU(input_size, output_size, hidden_size),
+                  #ExMLP(input_size, output_size, hidden_size), 
                   #ExLRestSelfAtten(input_size, output_size, hidden_size)
                 ]:
         model_experiment(model)
@@ -398,6 +399,12 @@ def main():
     plot_results([("train_accuracy_MLP.pth", "MLP - Train"), 
                   ("test_accuracy_MLP.pth", "MLP - Test")],
                    "Accuracy: MLP", "Epochs", "Accuracy", "accuracy_MLP.pdf")
+    plot_results([("train_losses_MLP_atten.pth", "MLP + Atten - Train"),
+                  ('test_losses_MLP_atten.pth', "MLP + Atten - Test")], 
+                  "Losses: MLP + Atten", "Epochs", "Loss", "losses_MLP_atten.pdf")
+    plot_results([("train_accuracy_MLP_atten.pth", "MLP + Atten - Train"), 
+                  ("test_accuracy_MLP_atten.pth", "MLP + Atten - Test")],
+                  "Accuracy: MLP + Atten", "Epochs", "Accuracy", "accuracy_MLP_atten.pdf")
 
 if __name__ == '__main__':
     main()
