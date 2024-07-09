@@ -1,11 +1,3 @@
-########################################################################
-########################################################################
-##                                                                    ##
-##                      ORIGINAL _ DO NOT PUBLISH                     ##
-##                                                                    ##
-########################################################################
-########################################################################
-
 import torch as tr
 import torch
 from torch.nn.functional import pad
@@ -13,12 +5,11 @@ import torch.nn as nn
 import numpy as np
 import loader as ld
 
-
 batch_size = 32
 output_size = 2
 hidden_size = 64        # to experiment with
 
-run_recurrent = False    # else run Token-wise MLP
+run_recurrent = True    # else run Token-wise MLP
 use_RNN = True          # otherwise GRU
 atten_size = 0          # atten > 0 means using restricted self atten
 
@@ -28,8 +19,10 @@ learning_rate = 0.001
 test_interval = 50
 
 # Loading sataset, use toy = True for obtaining a smaller dataset
-
 train_dataset, test_dataset, num_words, input_size = ld.get_data_set(batch_size)
+
+# Setting device to be used across the board
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Special matrix multipication layer (like torch.Linear but can operate on arbitrary sized
 # tensors and considers its last two indices as the matrix.)
@@ -49,30 +42,42 @@ class MatMul(nn.Module):
             x = x+ self.bias 
         return x
         
-# Implements RNN Unit
-
 class ExRNN(nn.Module):
     def __init__(self, input_size, output_size, hidden_size):
         super(ExRNN, self).__init__()
 
         self.hidden_size = hidden_size
-        self.sigmoid = torch.sigmoid
+        # TODO: Remove
+        #self.sigmoid = torch.sigmoid
 
         # RNN Cell weights
+        
+        # TODO: Experiment with in2out
+        # Cell FC, generating hidden state for the next step
         self.in2hidden = nn.Linear(input_size + hidden_size, hidden_size)
-        # what else?
+        # nn.Sequential(
+        #     nn.Linear(input_size + hidden_size, hidden_size), # hidden state for next step
+        #     nn.Tanh()
+        # )
+
+        # Output layer for the current step
+        self.hidden2out = nn.Linear(input_size + hidden_size, output_size)
 
     def name(self):
         return "RNN"
 
     def forward(self, x, hidden_state):
-
-        # Implementation of RNN cell
+        # Concatenating input and hidden state for input to the RNN cell
+        layer_in = torch.cat((x, hidden_state), 1)
         
+        # Feeding
+        hidden = self.in2hidden(layer_in)
+        output = self.hidden2out(layer_in)
+
         return output, hidden
 
     def init_hidden(self, bs):
-        return torch.zeros(bs, self.hidden_size)
+        return torch.zeros(bs, self.hidden_size).to(device)
 
 # Implements GRU Unit
 
@@ -126,7 +131,7 @@ class ExMLP(nn.Module):
 
 class ExLRestSelfAtten(nn.Module):
     def __init__(self, input_size, output_size, hidden_size):
-        super(ExRestSelfAtten, self).__init__()
+        super(ExLRestSelfAtten, self).__init__()
 
         self.input_size = input_size
         self.output_size = output_size
@@ -181,99 +186,121 @@ class ExLRestSelfAtten(nn.Module):
 def print_review(rev_text, sbs1, sbs2, lbl1, lbl2):
             
     # implement
+    pass
 
-# select model to use
+def model_experiment(model):
+    model.to(device)
+    print("Using model: " + model.name())
 
-if run_recurrent:
-    if use_RNN:
-        model = ExRNN(input_size, output_size, hidden_size)
-    else:
-        model = ExGRU(input_size, output_size, hidden_size)
-else:
-    if atten_size > 0:
-        model = ExRestSelfAtten(input_size, output_size, hidden_size)
-    else:
-        model = ExMLP(input_size, output_size, hidden_size)
+    if reload_model:
+        print("Reloading model")
+        model.load_state_dict(torch.load(model.name() + ".pth"))
 
-print("Using model: " + model.name())
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-if reload_model:
-    print("Reloading model")
-    model.load_state_dict(torch.load(model.name() + ".pth"))
+    train_loss = 1.0
+    test_loss = 1.0
 
-criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    train_losses = []
+    test_losses = []
 
-train_loss = 1.0
-test_loss = 1.0
+    # training steps in which a test step is executed every test_interval
+    for epoch in range(num_epochs):
 
-# training steps in which a test step is executed every test_interval
+        itr = 0 # iteration counter within each epoch
 
-for epoch in range(num_epochs):
+        for labels, reviews, reviews_text in train_dataset:   # getting training batches
+            labels.to(device)
+            reviews.to(device)
 
-    itr = 0 # iteration counter within each epoch
+            itr = itr + 1
 
-    for labels, reviews, reviews_text in train_dataset:   # getting training batches
+            if (itr + 1) % test_interval == 0:
+                test_iter = True
+                labels, reviews, reviews_text = next(iter(test_dataset)) # get a test batch 
+                labels.to(device)
+                reviews.to(device)
+            else:
+                test_iter = False
 
-        itr = itr + 1
+            # Recurrent nets (RNN/GRU)
+            if run_recurrent:
+                hidden_state = model.init_hidden(int(labels.shape[0]))
 
-        if (itr + 1) % test_interval == 0:
-            test_iter = True
-            labels, reviews, reviews_text = next(iter(test_dataset)) # get a test batch 
+                for i in range(num_words):
+                    output, hidden_state = model(reviews[:,i,:], hidden_state)  # HIDE
+            else:  # Token-wise networks (MLP / MLP + Atten.)
+                sub_score = []
+                if atten_size > 0:  
+                    # MLP + atten
+                    sub_score, atten_weights = model(reviews)
+                else:               
+                    # MLP
+                    sub_score = model(reviews)
+
+                output = torch.mean(sub_score, 1)
+                
+            # cross-entropy loss
+            loss = criterion(output, labels)
+
+            # optimize in training iterations
+            if not test_iter:
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+            # averaged losses
+            if test_iter:
+                test_loss = 0.8 * float(loss.detach()) + 0.2 * test_loss
+            else:
+                train_loss = 0.9 * float(loss.detach()) + 0.1 * train_loss
+
+            if test_iter:
+                print(
+                    f"Epoch [{epoch + 1}/{num_epochs}], "
+                    f"Step [{itr + 1}/{len(train_dataset)}], "
+                    f"Train Loss: {train_loss:.4f}, "
+                    f"Test Loss: {test_loss:.4f}"
+                )
+
+                if not run_recurrent:
+                    nump_subs = sub_score.detach().numpy()
+                    labels = labels.detach().numpy()
+                    print_review(reviews_text[0], nump_subs[0,:,0], nump_subs[0,:,1], labels[0,0], labels[0,1])
+
+                # saving the model
+                torch.save(model, f'model_{model.name()}.pth')
+
+        train_losses.append(train_loss)
+        test_losses.append(test_loss)
+
+    train_losses = torch.tensor(train_losses)
+    test_losses = torch.tensor(test_losses)
+    torch.save(train_losses, f"train_losses_{model.name()}.pth")
+    torch.save(test_losses, f"test_losses_{model.name()}.pth")
+
+def main():
+    # select model to use
+    if run_recurrent:
+        if use_RNN:
+            model = ExRNN(input_size, output_size, hidden_size)
         else:
-            test_iter = False
-
-        # Recurrent nets (RNN/GRU)
-
-        if run_recurrent:
-            hidden_state = model.init_hidden(int(labels.shape[0]))
-
-            for i in range(num_words):
-                output, hidden_state = model(reviews[:,i,:], hidden_state)  # HIDE
-
-        else:  
-
-        # Token-wise networks (MLP / MLP + Atten.) 
-        
-            sub_score = []
-            if atten_size > 0:  
-                # MLP + atten
-                sub_score, atten_weights = model(reviews)
-            else:               
-                # MLP
-                sub_score = model(reviews)
-
-            output = torch.mean(sub_score, 1)
-            
-        # cross-entropy loss
-
-        loss = criterion(output, labels)
-
-        # optimize in training iterations
-
-        if not test_iter:
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-        # averaged losses
-        if test_iter:
-            test_loss = 0.8 * float(loss.detach()) + 0.2 * test_loss
+            model = ExGRU(input_size, output_size, hidden_size)
+    else:
+        if atten_size > 0:
+            model = ExLRestSelfAtten(input_size, output_size, hidden_size)
         else:
-            train_loss = 0.9 * float(loss.detach()) + 0.1 * train_loss
+            model = ExMLP(input_size, output_size, hidden_size)
 
-        if test_iter:
-            print(
-                f"Epoch [{epoch + 1}/{num_epochs}], "
-                f"Step [{itr + 1}/{len(train_dataset)}], "
-                f"Train Loss: {train_loss:.4f}, "
-                f"Test Loss: {test_loss:.4f}"
-            )
+    model_experiment(model)
 
-            if not run_recurrent:
-                nump_subs = sub_score.detach().numpy()
-                labels = labels.detach().numpy()
-                print_review(reviews_text[0], nump_subs[0,:,0], nump_subs[0,:,1], labels[0,0], labels[0,1])
+    # Running experimentation for each model superclass
+    # for model in [ExRNN(input_size, output_size, hidden_size), 
+    #               ExGRU(input_size, output_size, hidden_size), 
+    #               ExMLP(input_size, output_size, hidden_size), 
+    #               ExLRestSelfAtten(input_size, output_size, hidden_size)]:
+    #     model_experiment(model)
 
-            # saving the model
-            torch.save(model, model.name() + ".pth")
+if __name__ == '__main__':
+    main()
