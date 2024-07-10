@@ -141,8 +141,6 @@ class ExMLP(nn.Module):
     def __init__(self, input_size, output_size, hidden_size):
         super(ExMLP, self).__init__()
 
-        self.ReLU = torch.nn.ReLU()
-
         # Token-wise MLP network weights
         self.fc = nn.Sequential(
             MatMul(input_size, hidden_size),
@@ -167,8 +165,8 @@ class ExLRestSelfAtten(nn.Module):
         
         # Token-wise MLP + Restricted Attention network implementation
 
-        self.encoding = nn.Sequential(
-            MatMul(input_size,hidden_size),
+        self.input_layer = nn.Sequential(
+            MatMul(input_size, hidden_size),
             nn.ReLU(),
         )
 
@@ -176,6 +174,7 @@ class ExLRestSelfAtten(nn.Module):
         self.W_k = MatMul(hidden_size, hidden_size, use_bias=False)
         self.W_v = MatMul(hidden_size, hidden_size, use_bias=False)
 
+        # The ouput layer is computing the sub-prediction scores, as in the original MLP
         self.output_layer = nn.Sequential(
             MatMul(hidden_size, output_size)
         )
@@ -184,7 +183,7 @@ class ExLRestSelfAtten(nn.Module):
         return "MLP_atten"
 
     def forward(self, x):
-        x = self.encoding(x)
+        x = self.input_layer(x)
 
         # generating x in offsets between -atten_size and atten_size 
         # with zero padding at the ends
