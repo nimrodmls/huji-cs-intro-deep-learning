@@ -1,4 +1,3 @@
-import torch as tr
 import torch
 from torch.nn.functional import pad
 import torch.nn as nn
@@ -78,6 +77,9 @@ class ExRNN(nn.Module):
 
     def name(self):
         return "RNN"
+    
+    def uid(self):
+        return f'{self.name()}_{self.hidden_size}'
 
     def forward(self, x, hidden_state):
         # Concatenating input and hidden state for input to the RNN cell
@@ -120,6 +122,9 @@ class ExGRU(nn.Module):
 
     def name(self):
         return "GRU"
+    
+    def uid(self):
+        return f'{self.name()}_{self.hidden_size}'
 
     def forward(self, x, hidden_state):
         layer_in = torch.cat((x, hidden_state), 1)
@@ -150,6 +155,9 @@ class ExMLP(nn.Module):
 
     def name(self):
         return "MLP"
+    
+    def uid(self):
+        return self.name()
 
     def forward(self, x):
         return self.fc(x)
@@ -181,6 +189,9 @@ class ExLRestSelfAtten(nn.Module):
 
     def name(self):
         return "MLP_atten"
+    
+    def uid(self):
+        return self.name()
 
     def forward(self, x):
         x = self.input_layer(x)
@@ -332,7 +343,7 @@ def model_experiment(model):
                     #print_review(reviews_text[0], nump_subs[0,:,0], nump_subs[0,:,1], labels[0,0], labels[0,1])
 
                 # saving the model
-                torch.save(model, f'model_{model.name()}.pth')
+                torch.save(model, f'model_{model.uid()}.pth')
 
         train_losses.append(train_ep_loss / len(train_dataset))
         test_losses.append(test_ep_loss / total_test_batches) # For now using only one batch at a time
@@ -342,10 +353,64 @@ def model_experiment(model):
     print(f'{model.name()} - Recall: {true_positives / (true_positives + false_negatives):.4f}, '
           f'Test Accuracy: {test_accuracy[-1]:.4f}, Test Loss: {test_losses[-1]:.4f}')
     # Saving the final results
-    torch.save(train_losses, f"train_losses_{model.name()}.pth")
-    torch.save(test_losses, f"test_losses_{model.name()}.pth")
-    torch.save(train_accuracy, f"train_accuracy_{model.name()}.pth")
-    torch.save(test_accuracy, f"test_accuracy_{model.name()}.pth")
+    torch.save(train_losses, f"train_losses_{model.uid()}.pth")
+    torch.save(test_losses, f"test_losses_{model.uid()}.pth")
+    torch.save(train_accuracy, f"train_accuracy_{model.uid()}.pth")
+    torch.save(test_accuracy, f"test_accuracy_{model.uid()}.pth")
+
+def evaluate_model(model):
+    """
+    Evaluating the model with test samples and finding samples which are 
+    True-Positive, True-Negative, False-Positive & False-Negative
+    """
+    model.to(device)
+    model.eval()
+
+    true_pos = None
+    false_pos = None
+    true_neg = None
+    false_neg = None
+    
+    with torch.no_grad():
+        for labels, reviews, reviews_text in test_dataset:
+            labels.to(device)
+            reviews.to(device)
+
+            if model.name() in ["RNN", "GRU"]:
+                hidden_state = model.init_hidden(int(labels.shape[0]))
+
+                for i in range(num_words):
+                    output, hidden_state = model(reviews[:,i,:], hidden_state)
+            else:
+                sub_score = []
+                if model.name() == 'MLP_atten':
+                    sub_score, atten_weights = model(reviews)
+                else:
+                    sub_score = model(reviews)
+
+                output = torch.mean(sub_score, 1)
+
+            simple_labels = simplify_labels(labels)
+            pred_vec = get_prediction_vector(output)
+
+            for i in range(labels.shape[0]):
+                if simple_labels[i] == 1.0 and pred_vec[i] == 1.0:
+                    true_pos = (reviews_text[i], sub_score[i,:,0], sub_score[i,:,1], 1, 0)
+                elif simple_labels[i] == 0.0 and pred_vec[i] == 0.0:
+                    true_neg = (reviews_text[i], sub_score[i,:,0], sub_score[i,:,1], 0, 1)
+                elif simple_labels[i] == 0.0 and pred_vec[i] == 1.0:
+                    false_pos = (reviews_text[i], sub_score[i,:,0], sub_score[i,:,1], 0, 1)
+                elif simple_labels[i] == 1.0 and pred_vec[i] == 0.0:
+                    false_neg = (reviews_text[i], sub_score[i,:,0], sub_score[i,:,1], 1, 0)
+
+    print("## True Positive")
+    print_review(*true_pos)
+    print("## False Positive")
+    print_review(*false_pos)
+    print("## True Negative")
+    print_review(*true_neg)
+    print("## False Negative")
+    print_review(*false_neg)
 
 def plot_results(data, title, xlabel, ylabel, filename):
     """
@@ -361,37 +426,42 @@ def plot_results(data, title, xlabel, ylabel, filename):
     plt.savefig(filename)
 
 def main():
-    # select model to use
-    # if run_recurrent:
-    #     if use_RNN:
-    #         model = ExRNN(input_size, output_size, hidden_size)
-    #     else:
-    #         model = ExGRU(input_size, output_size, hidden_size)
-    # else:
-    #     if atten_size > 0:
-    #         model = ExLRestSelfAtten(input_size, output_size, hidden_size)
-    #     else:
-    #         model = ExMLP(input_size, output_size, hidden_size)
-
     # Running experimentation for each model superclass
     for model in [
-                  ExRNN(input_size, output_size, hidden_size), 
-                  ExGRU(input_size, output_size, hidden_size),
-                  ExMLP(input_size, output_size, hidden_size), 
-                  ExLRestSelfAtten(input_size, output_size, hidden_size)
+                  #ExRNN(input_size, output_size, hidden_size=64), 
+                  #ExRNN(input_size, output_size, hidden_size=128), 
+                  #ExGRU(input_size, output_size, hidden_size=64),
+                  #ExGRU(input_size, output_size, hidden_size=128),
+                  #ExMLP(input_size, output_size, hidden_size), 
+                  #ExLRestSelfAtten(input_size, output_size, hidden_size)
                 ]:
         model_experiment(model)
 
+    # Evaluating models on specific terms
+    print("Evaluating MLP model...")
+    evaluate_model(torch.load('model_MLP.pth'))
+
+    print("Evaluating MLP + Attention model...")
+    evaluate_model(torch.load('model_MLP_atten.pth'))
+
     # Plotting the results
-    plot_results([("train_losses_RNN.pth", "RNN - Train"), 
-                  ('test_losses_RNN.pth', "RNN - Test"),
-                  ("train_losses_GRU.pth", "GRU - Train"),
-                  ('test_losses_GRU.pth', "GRU - Test")], 
+    plot_results([('train_losses_RNN_64.pth', "RNN (64) - Train"),
+                  ('test_losses_RNN_64.pth', "RNN (64) - Test"),
+                  ("train_losses_GRU_64.pth", "GRU (64) - Train"),
+                  ('test_losses_GRU_64.pth', "GRU (64) - Test"),
+                  ("train_losses_RNN_128.pth", "RNN (128) - Train"), 
+                  ('test_losses_RNN_128.pth', "RNN (128) - Test"),
+                  ("train_losses_GRU_128.pth", "GRU (128) - Train"),
+                  ('test_losses_GRU_128.pth', "GRU (128) - Test")], 
                   "Losses: GRU vs. RNN", "Epochs", "Loss", "losses_RNN_GRU.pdf")
-    plot_results([("train_accuracy_RNN.pth", "RNN - Train"), 
-                  ("test_accuracy_RNN.pth", "RNN - Test"),
-                  ("train_accuracy_GRU.pth", "GRU - Train"),
-                  ("test_accuracy_GRU.pth", "GRU - Test")],
+    plot_results([('train_accuracy_RNN_64.pth', "RNN (64) - Train"),
+                  ('test_accuracy_RNN_64.pth', "RNN (64) - Test"),
+                  ("train_accuracy_GRU_64.pth", "GRU (64) - Train"),
+                  ('test_accuracy_GRU_64.pth', "GRU (64) - Test"),
+                  ("train_accuracy_RNN_128.pth", "RNN (128) - Train"), 
+                  ("test_accuracy_RNN_128.pth", "RNN (128) - Test"),
+                  ("train_accuracy_GRU_128.pth", "GRU (128) - Train"),
+                  ("test_accuracy_GRU_128.pth", "GRU (128) - Test")],
                   "Accuracy: GRU vs. RNN", "Epochs", "Accuracy", "accuracy_RNN_GRU.pdf")
     plot_results([("train_losses_MLP.pth", "MLP - Train"), 
                   ('test_losses_MLP.pth', "MLP - Test")], 
