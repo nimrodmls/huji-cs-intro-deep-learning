@@ -233,6 +233,9 @@ def print_review(rev_text, sbs1, sbs2, lbl1, lbl2):
           f'True: {get_label(simplify_labels(torch.tensor([[lbl1, lbl2]], device=device)))}')
 
 def model_experiment(model):
+    """
+    Primary training function for the model
+    """
     model.to(device)
     print("Using model: " + model.name())
 
@@ -351,8 +354,9 @@ def model_experiment(model):
 
 def evaluate_model(model):
     """
-    Evaluating the model with test samples and finding samples which are 
+    Evaluating the model with the (full) test samples and finding samples which are 
     True-Positive, True-Negative, False-Positive & False-Negative
+    -- ONLY FOR MLP & MLP-Atten --
     """
     model.to(device)
     model.eval()
@@ -367,20 +371,13 @@ def evaluate_model(model):
             labels.to(device)
             reviews.to(device)
 
-            output = None
-            if model.name() in ["RNN", "GRU"]:
-                hidden_state = model.init_hidden(int(labels.shape[0]))
-
-                for i in range(num_words):
-                    output, hidden_state = model(reviews[:,i,:], hidden_state)
+            sub_score = []
+            if model.name() == 'MLP_atten':
+                sub_score, atten_weights = model(reviews)
             else:
-                sub_score = []
-                if model.name() == 'MLP_atten':
-                    sub_score, atten_weights = model(reviews)
-                else:
-                    sub_score = model(reviews)
+                sub_score = model(reviews)
 
-                output = torch.mean(sub_score, 1)
+            output = torch.mean(sub_score, 1)
 
             simple_labels = simplify_labels(labels)
             pred_vec = get_prediction_vector(output)
@@ -405,13 +402,14 @@ def evaluate_model(model):
     print_review(*false_neg)
 
 
-def evaluate_custom_texts(model):
+def evaluate_custom_texts(model, custom_texts, custom_labels):
     """
+    Evaluation of the given model on the custom texts & labels
     """
     model.to(device)
     model.eval()
 
-    _, custom_dataset, num_words, input_size = ld.get_data_set(batch_size, toy=True)
+    _, custom_dataset, num_words, _ = ld.get_data_set(batch_size, (custom_texts, custom_labels))
 
     with torch.no_grad():
         for labels, reviews, reviews_text in custom_dataset:
@@ -424,6 +422,16 @@ def evaluate_custom_texts(model):
 
                 for i in range(num_words):
                     output, hidden_state = model(reviews[:,i,:], hidden_state)
+
+                # Printing misclassifications
+                simple_labels = simplify_labels(labels)
+                pred_vec = get_prediction_vector(output)
+
+                misclass_map = simple_labels != pred_vec
+                for review_idx in torch.nonzero(misclass_map).flatten():
+                    print(f'Review: {" ".join(reviews_text[review_idx])}')
+                    print(f'Prediction: {pred_vec[review_idx]}, True: {simple_labels[review_idx]}')
+
             else:
                 sub_score = []
                 if model.name() == 'MLP_atten':
@@ -431,26 +439,30 @@ def evaluate_custom_texts(model):
                 else:
                     sub_score = model(reviews)
 
+                # The custom reviews are short the the padding may introduce
+                # some slight inaccuracies, so the sub scores are truncated
                 output = torch.mean(sub_score[:, 0:15, :], 1)
 
-            simple_labels = simplify_labels(labels)
-            pred_vec = get_prediction_vector(output)
+                # Finding and printing all the misclassifications
+                # (note that in the case of MLP/MLP-Atten the handling is different
+                # hence the separate block)
+                simple_labels = simplify_labels(labels)
+                pred_vec = get_prediction_vector(output)
 
-            # Printing all misclassifications
-            misclass_map = simple_labels != pred_vec
-            for review_idx in torch.nonzero(misclass_map).flatten():
-                print_review(
-                    reviews_text[review_idx], 
-                    sub_score[review_idx,:,0], 
-                    sub_score[review_idx,:,1], 
-                    simple_labels[review_idx], 
-                    int(not simple_labels[review_idx]))
-                #print(f"Review: {' '.join(reviews_text[review_idx])}")
-                #print(f'True: {simple_labels[review_idx]}, Predicted: {pred_vec[review_idx]}')
+                misclass_map = simple_labels != pred_vec
+                for review_idx in torch.nonzero(misclass_map).flatten():
+                    print_review(
+                        reviews_text[review_idx], 
+                        sub_score[review_idx,:,0], 
+                        sub_score[review_idx,:,1], 
+                        simple_labels[review_idx], 
+                        int(not simple_labels[review_idx]))
 
 
 def plot_results(data, title, xlabel, ylabel, filename):
     """
+    Generic function for plotting results
+    Expects data to be 3-tuple of (points_filename, description, format)
     """
     plt.figure()
     for x, description, fmt in data:
@@ -466,26 +478,30 @@ def plot_results(data, title, xlabel, ylabel, filename):
 def main():
     # Running experimentation for each model superclass
     for model in [
-                #   ExRNN(input_size, output_size, hidden_size=64), 
-                #   ExRNN(input_size, output_size, hidden_size=128), 
-                #   ExGRU(input_size, output_size, hidden_size=64),
-                #   ExGRU(input_size, output_size, hidden_size=128),
-                #   ExMLP(input_size, output_size, hidden_size), 
-                #   ExLRestSelfAtten(input_size, output_size, hidden_size)
+                  ExRNN(input_size, output_size, hidden_size=64), 
+                  ExRNN(input_size, output_size, hidden_size=128), 
+                  ExGRU(input_size, output_size, hidden_size=64),
+                  ExGRU(input_size, output_size, hidden_size=128),
+                  ExMLP(input_size, output_size, hidden_size), 
+                  ExLRestSelfAtten(input_size, output_size, hidden_size)
                 ]:
         model_experiment(model)
 
     # Evaluating models on specific terms
     print("Evaluating MLP model...")
-    # evaluate_model(torch.load('model_MLP.pth'))
+    evaluate_model(torch.load('model_MLP.pth'))
 
     print("Evaluating MLP + Attention model...")
-    # evaluate_model(torch.load('model_MLP_atten.pth'))
+    evaluate_custom_texts(torch.load('model_MLP_atten.pth'), ld.exp4_texts, ld.exp4_labels)
 
+    print("Evaluating RNN model on custom text...")
+    evaluate_custom_texts(torch.load('model_RNN_128.pth'), ld.my_test_texts, ld.my_test_labels)
+    print("Evaluating GRU model on custom text...")
+    evaluate_custom_texts(torch.load('model_GRU_64.pth'), ld.my_test_texts, ld.my_test_labels)
     print("Evaluating MLP on custom text...")
-    evaluate_custom_texts(torch.load('model_MLP.pth'))
+    evaluate_custom_texts(torch.load('model_MLP.pth'), ld.my_test_texts, ld.my_test_labels)
     print("Evaluating MLP+Attention on custom text...")
-    evaluate_custom_texts(torch.load('model_MLP_atten.pth'))
+    evaluate_custom_texts(torch.load('model_MLP_atten.pth'), ld.my_test_texts, ld.my_test_labels)
 
     # Plotting the results
     plot_results([('train_losses_RNN_64.pth', "RNN (64) - Train", 'g--'),
