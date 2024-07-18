@@ -38,8 +38,8 @@ def load_data_set(load_my_reviews=False):
     train_iter=ReviewDataset(train_data["review"],train_data["sentiment"])
     test_data=data[Train_size:]
     if load_my_reviews:
-        my_data = pd.DataFrame({"review": my_test_texts, "sentiment": my_test_labels})
-        test_data=test_data.append(my_data)
+        test_data = pd.DataFrame({"review": my_test_texts, "sentiment": my_test_labels})
+        #test_data = pd.concat([test_data, my_data], ignore_index=True)
     test_data=test_data.reset_index(drop=True)
     test_iter=ReviewDataset(test_data["review"],test_data["sentiment"])
     return train_iter, test_iter
@@ -80,10 +80,10 @@ def collact_batch(batch):
 ##########################
 
 my_test_texts = []
-my_test_texts.append(" this movie is very very bad ,the worst movie ")
-my_test_texts.append(" this movie is so great")
-my_test_texts.append("I really  liked the fish and animations the anther casting was not so good ")
-my_test_labels = ["neg", "pos", "pos"]
+my_test_texts.append("The only great thing about this movie is that it ended quickly") # Aiming for False-Positive
+my_test_texts.append("The movie follows a group of the worst, most horrible humans, so creative!") # Aiming for False-Negative
+my_test_texts.append("The greatest disappointment of recent history") # Aiming for False-Positive on MLP, and True-Negative on Atten
+my_test_labels = ["negative", "positive", "negative"]
 
 ##########################
 ##########################
